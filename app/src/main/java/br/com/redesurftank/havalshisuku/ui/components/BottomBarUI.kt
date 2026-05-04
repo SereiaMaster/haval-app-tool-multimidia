@@ -1,11 +1,13 @@
 package br.com.redesurftank.havalshisuku.ui.components
 
 import android.content.Context
-import android.view.MotionEvent
 import android.util.Log
+import android.view.MotionEvent
+import android.view.SoundEffectConstants
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
@@ -18,6 +20,7 @@ import androidx.compose.ui.*
 import androidx.compose.ui.draw.*
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -955,6 +958,59 @@ fun SettingsCategoryRow(
     }
 }
 
+/** Som curto de “passo” (efeito de clique do sistema), sem vibração. */
+@Composable
+private fun rememberBottomBarAdjustSound(): () -> Unit {
+    val view = LocalView.current
+    return remember(view) { { view.playSoundEffect(SoundEffectConstants.CLICK) } }
+}
+
+/**
+ * Arrasto horizontal no valor: direita aumenta, esquerda diminui. Mantém os mesmos passos que
+ * [onIncrement]/[onDecrement]; emite som por passo.
+ */
+@Composable
+private fun Modifier.dragHorizontalValueAdjust(
+        enabled: Boolean,
+        pixelsPerStep: Float,
+        onIncrement: () -> Unit,
+        onDecrement: () -> Unit,
+        onDraggingChange: (Boolean) -> Unit,
+): Modifier {
+    val playSound = rememberBottomBarAdjustSound()
+    val onInc by rememberUpdatedState(onIncrement)
+    val onDec by rememberUpdatedState(onDecrement)
+    val onDrag by rememberUpdatedState(onDraggingChange)
+    val sound by rememberUpdatedState(playSound)
+    return this.then(
+            Modifier.pointerInput(enabled, pixelsPerStep) {
+                if (!enabled) return@pointerInput
+                var pending = 0f
+                detectHorizontalDragGestures(
+                        onDragStart = {
+                            pending = 0f
+                            onDrag(true)
+                        },
+                        onDragEnd = { onDrag(false) },
+                        onDragCancel = { onDrag(false) },
+                        onHorizontalDrag = { _, dragAmount ->
+                            pending += dragAmount
+                            while (pending <= -pixelsPerStep) {
+                                onDec()
+                                sound()
+                                pending += pixelsPerStep
+                            }
+                            while (pending >= pixelsPerStep) {
+                                onInc()
+                                sound()
+                                pending -= pixelsPerStep
+                            }
+                        }
+                )
+            }
+    )
+}
+
 @Composable
 fun TempControlSection(
         label: String,
@@ -963,6 +1019,9 @@ fun TempControlSection(
         onValueChange: (Float) -> Unit
 ) {
     val alpha = if (isEnabled) 1f else 0.4f
+    val density = LocalDensity.current
+    val pxPerStep = with(density) { 20.dp.toPx() }
+    var valueDragging by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.alpha(alpha)) {
         SmallButton(Icons.Default.Remove, isEnabled) { onValueChange(-0.5f) }
         Column(
@@ -974,6 +1033,7 @@ fun TempControlSection(
             val isAbnormal = floatTemp >= 85f || floatTemp <= -40f || floatTemp == -1f
             val displayTemp = if (!isEnabled || isAbnormal) "--" else temp
             val tempColor = if (floatTemp > 30f) Color.Red else Color.White
+            val dragEnabled = isEnabled && displayTemp != "--"
             Text(
                     text =
                             buildAnnotatedString {
@@ -983,7 +1043,21 @@ fun TempControlSection(
                                 if (displayTemp != "--") append("°C")
                             },
                     style = commonTextStyle.copy(fontSize = 18.sp),
-                    modifier = Modifier.padding(horizontal = 4.dp)
+                    modifier =
+                            Modifier.padding(horizontal = 4.dp)
+                                    .alpha(if (valueDragging) 0.88f else 1f)
+                                    .graphicsLayer {
+                                        transformOrigin = TransformOrigin(0.5f, 0.5f)
+                                        scaleX = if (valueDragging) 1.04f else 1f
+                                        scaleY = if (valueDragging) 1.04f else 1f
+                                    }
+                                    .dragHorizontalValueAdjust(
+                                            enabled = dragEnabled,
+                                            pixelsPerStep = pxPerStep,
+                                            onIncrement = { onValueChange(0.5f) },
+                                            onDecrement = { onValueChange(-0.5f) },
+                                            onDraggingChange = { valueDragging = it }
+                                    )
             )
         }
         SmallButton(Icons.Default.Add, isEnabled) { onValueChange(0.5f) }
@@ -993,6 +1067,9 @@ fun TempControlSection(
 @Composable
 fun FanControlSection(speed: Int, isEnabled: Boolean, onValueChange: (Int) -> Unit) {
     val alpha = if (isEnabled) 1f else 0.4f
+    val density = LocalDensity.current
+    val pxPerStep = with(density) { 20.dp.toPx() }
+    var valueDragging by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.alpha(alpha)) {
         SmallButton(Icons.Default.Remove, isEnabled) { onValueChange(-1) }
         Column(
@@ -1000,7 +1077,25 @@ fun FanControlSection(speed: Int, isEnabled: Boolean, onValueChange: (Int) -> Un
                 modifier = Modifier.width(120.dp)
         ) {
             Text(text = "Ventilação", style = labelStyle.copy(fontSize = 10.sp))
-            Text(text = speed.toString(), style = commonTextStyle.copy(fontSize = 18.sp))
+            Text(
+                    text = speed.toString(),
+                    style = commonTextStyle.copy(fontSize = 18.sp),
+                    modifier =
+                            Modifier.padding(horizontal = 4.dp)
+                                    .alpha(if (valueDragging) 0.88f else 1f)
+                                    .graphicsLayer {
+                                        transformOrigin = TransformOrigin(0.5f, 0.5f)
+                                        scaleX = if (valueDragging) 1.04f else 1f
+                                        scaleY = if (valueDragging) 1.04f else 1f
+                                    }
+                                    .dragHorizontalValueAdjust(
+                                            enabled = isEnabled,
+                                            pixelsPerStep = pxPerStep,
+                                            onIncrement = { onValueChange(1) },
+                                            onDecrement = { onValueChange(-1) },
+                                            onDraggingChange = { valueDragging = it }
+                                    )
+            )
         }
         SmallButton(Icons.Default.Add, isEnabled) { onValueChange(1) }
     }
@@ -1039,6 +1134,9 @@ fun FanSpeedIcon(speed: Int) {
 
 @Composable
 fun VolumeControlSection(label: String, volume: Int, onValueChange: (Int) -> Unit) {
+    val density = LocalDensity.current
+    val pxPerStep = with(density) { 20.dp.toPx() }
+    var valueDragging by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         SmallButton(Icons.Default.Remove) { onValueChange(-1) }
         Column(
@@ -1049,7 +1147,21 @@ fun VolumeControlSection(label: String, volume: Int, onValueChange: (Int) -> Uni
             Text(
                     text = volume.toString(),
                     style = commonTextStyle,
-                    modifier = Modifier.padding(horizontal = 4.dp)
+                    modifier =
+                            Modifier.padding(horizontal = 4.dp)
+                                    .alpha(if (valueDragging) 0.88f else 1f)
+                                    .graphicsLayer {
+                                        transformOrigin = TransformOrigin(0.5f, 0.5f)
+                                        scaleX = if (valueDragging) 1.04f else 1f
+                                        scaleY = if (valueDragging) 1.04f else 1f
+                                    }
+                                    .dragHorizontalValueAdjust(
+                                            enabled = true,
+                                            pixelsPerStep = pxPerStep,
+                                            onIncrement = { onValueChange(1) },
+                                            onDecrement = { onValueChange(-1) },
+                                            onDraggingChange = { valueDragging = it }
+                                    )
             )
         }
         SmallButton(Icons.Default.Add) { onValueChange(1) }

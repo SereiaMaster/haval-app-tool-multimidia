@@ -64,6 +64,18 @@ class BottomBarService : LifecycleService() {
     private val REFERENCE_OVERSCAN = 60
     private val BASE_OFFSET_Y = -60 // Starting point for y at 60 overscan
 
+    /**
+     * When the saved global overscan is 0 (or negative), still reserve the visible bar height so
+     * `wm overscan` insets the usable area; apps (Android Auto, etc.) relayout above the bar while
+     * the overlay stays on top. Per-app overrides in [APP_OVERRIDES] / prefs JSON may still use 0.
+     */
+    private fun resolvedGlobalOverscanDp(fromPrefs: Int): Int =
+            if (fromPrefs <= 0) BOTTOM_BAR_BASE_HEIGHT_DP.toInt() else fromPrefs
+
+    /** Bottom inset in dp for wm overscan while the bar is visible (overrides may use 0 meaning “unset”). */
+    private fun effectiveOverscanDpForWm(settings: BarSettings): Int =
+            if (settings.overscan <= 0) BOTTOM_BAR_BASE_HEIGHT_DP.toInt() else settings.overscan
+
     override fun onCreate() {
         android.util.Log.e("BottomBarService", "SERVICE ONCREATE - STARTING")
         super.onCreate()
@@ -262,10 +274,10 @@ class BottomBarService : LifecycleService() {
             emptyMap()
         }
 
-        // Priority: Dynamic Overrides -> Hardcoded Overrides -> Default
-        return dynamicOverrides[packageName] 
-            ?: APP_OVERRIDES[packageName] 
-            ?: BarSettings(overscan = defaultOverscan, yOffset = 0)
+        // Priority: Dynamic Overrides -> Hardcoded Overrides -> Default (coerce 0 prefs → bar height)
+        return dynamicOverrides[packageName]
+                ?: APP_OVERRIDES[packageName]
+                ?: BarSettings(overscan = resolvedGlobalOverscanDp(defaultOverscan), yOffset = 0)
     }
 
     private fun applyAppSettings(settings: BarSettings) {
@@ -288,7 +300,7 @@ class BottomBarService : LifecycleService() {
         val isRestored = lastPackage != null && BottomBarState.restoredApps.contains(lastPackage)
         val multiplier = if (isRestored) 3.0f else 1.0f
 
-        val overscanValueRaw = settings.overscan
+        val overscanValueRaw = effectiveOverscanDpForWm(settings)
         val overscanValuePx = (overscanValueRaw.toFloat() * density * multiplier).toInt()
         val yOffsetPx = (settings.yOffset * density).toInt()
 
@@ -356,13 +368,14 @@ class BottomBarService : LifecycleService() {
                     val prefs = br.com.redesurftank.App.getDeviceProtectedContext()
                         .getSharedPreferences("haval_prefs", Context.MODE_PRIVATE)
                     val storedDefault = prefs.getInt(SharedPreferencesKeys.PERSISTENT_BOTTOM_BAR_OVERSCAN.key, 0)
-                    BarSettings(overscan = storedDefault, yOffset = 0)
+                    BarSettings(overscan = resolvedGlobalOverscanDp(storedDefault), yOffset = 0)
                 }
                 
                 val isRestored = lastPackage != null && BottomBarState.restoredApps.contains(lastPackage)
                 val multiplier = if (isRestored) 3.0f else 1.0f
 
-                val overscanValuePx = (settings.overscan.toFloat() * density * multiplier).toInt()
+                val overscanDp = effectiveOverscanDpForWm(settings)
+                val overscanValuePx = (overscanDp.toFloat() * density * multiplier).toInt()
                 val yOffsetPx = (settings.yOffset * density).toInt()
 
                 withContext(Dispatchers.Main) {
@@ -517,10 +530,11 @@ class BottomBarService : LifecycleService() {
                     val prefs = br.com.redesurftank.App.getDeviceProtectedContext()
                         .getSharedPreferences("haval_prefs", Context.MODE_PRIVATE)
                     val storedDefault = prefs.getInt(SharedPreferencesKeys.PERSISTENT_BOTTOM_BAR_OVERSCAN.key, 0)
-                    BarSettings(overscan = storedDefault, yOffset = 0)
+                    BarSettings(overscan = resolvedGlobalOverscanDp(storedDefault), yOffset = 0)
                 }
-                
-                val overscanValuePx = (settings.overscan * density).toInt()
+
+                val overscanDp = effectiveOverscanDpForWm(settings)
+                val overscanValuePx = (overscanDp * density).toInt()
                 val yOffsetPx = (settings.yOffset * density).toInt()
 
                 val lp = params

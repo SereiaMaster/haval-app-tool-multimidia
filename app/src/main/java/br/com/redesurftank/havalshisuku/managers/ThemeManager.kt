@@ -29,7 +29,8 @@ class ThemeManager private constructor(val context: Context) {
 
     companion object {
         private const val TAG = "ThemeManager"
-        const val THEME_REPO_URL = "https://github.com/netseek/haval-app-tool-multimidia/tree/feature/new-screen-enhancements-v6/cluster-widgets/Themes"
+        const val THEME_REPO_URL =
+                "https://github.com/SereiaMaster/haval-app-tool-multimidia/tree/master/cluster-widgets/Themes"
         
         @Volatile
         private var instance: ThemeManager? = null
@@ -284,7 +285,8 @@ class ThemeManager private constructor(val context: Context) {
                 if (!destDir.exists()) destDir.mkdirs()
                 
                 // 1. Get folder contents from GitHub API
-                val apiUrl = "https://api.github.com/repos/netseek/haval-app-tool-multimidia/contents/cluster-widgets/Themes/${metadata.folderName}?ref=feature/new-screen-enhancements-v6"
+                val apiUrl =
+                        "https://api.github.com/repos/SereiaMaster/haval-app-tool-multimidia/contents/cluster-widgets/Themes/${metadata.folderName}?ref=master"
                 val url = URL(apiUrl)
                 val conn = url.openConnection() as HttpURLConnection
                 conn.setRequestProperty("Accept", "application/vnd.github.v3+json")
