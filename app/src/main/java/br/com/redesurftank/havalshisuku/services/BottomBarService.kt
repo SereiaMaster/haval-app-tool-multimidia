@@ -3619,7 +3619,7 @@ class BottomBarService : LifecycleService() {
                                 )
                             } else {
                                 val screenHeight = displayMetrics.heightPixels
-                                val radialMenuHeight = (440 * density).toInt()
+                                val radialMenuHeight = (528 * density).toInt()
 
                                 if (BottomBarState.isVisible) {
                                     val subExpanded =
@@ -3627,7 +3627,7 @@ class BottomBarService : LifecycleService() {
                                                     br.com.redesurftank.havalshisuku.models.RadialSubMenu.None
                                     val touchHeight =
                                             if (BottomBarState.useLegacyBottomBar) (70 * density).toInt()
-                                            else if (subExpanded) (580 * density).toInt()
+                                            else if (subExpanded) (700 * density).toInt()
                                             else radialMenuHeight
                                     region.union(
                                             Rect(
@@ -3648,7 +3648,7 @@ class BottomBarService : LifecycleService() {
                                             (dpWidth *
                                                             br.com.redesurftank.havalshisuku.ui.components
                                                                     .DOCK_WIDTH_FRACTION)
-                                                    .coerceIn(420f, 900f)
+                                                    .coerceIn(504f, 1080f)
                                     val uiScale = (dockWidthDp / 620f).coerceIn(0.9f, 1.2f)
                                     val startPadDp = 10f * uiScale
                                     val handleWidthDp = 120f * uiScale

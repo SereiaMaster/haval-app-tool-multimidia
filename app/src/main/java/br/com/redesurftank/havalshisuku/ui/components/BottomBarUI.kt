@@ -395,6 +395,7 @@ private fun DockBottomBarContent() {
                         },
                         onVolumeChange = { delta ->
                             val newVol = (volume + delta).coerceIn(0, 30)
+                            volume = newVol
                             serviceManager.updateData(
                                     CarConstants.SYS_SETTINGS_AUDIO_MEDIA_VOLUME.getValue(),
                                     newVol.toString()
@@ -402,6 +403,7 @@ private fun DockBottomBarContent() {
                         },
                         onNavVolumeChange = { delta ->
                             val newVol = (navVolume + delta).coerceIn(0, 30)
+                            navVolume = newVol
                             serviceManager.updateData(
                                     CarConstants.SYS_SETTINGS_AUDIO_NAVI_VOLUME.getValue(),
                                     newVol.toString()
@@ -409,6 +411,7 @@ private fun DockBottomBarContent() {
                         },
                         onAlertVolumeChange = { delta ->
                             val newVol = (alertVolume + delta).coerceIn(0, 30)
+                            alertVolume = newVol
                             serviceManager.updateData(
                                     CarConstants.SYS_SETTINGS_AUDIO_RING_VOLUME.getValue(),
                                     newVol.toString()
@@ -416,6 +419,7 @@ private fun DockBottomBarContent() {
                         },
                         onPhoneVolumeChange = { delta ->
                             val newVol = (phoneVolume + delta).coerceIn(0, 30)
+                            phoneVolume = newVol
                             serviceManager.updateData(
                                     CarConstants.SYS_SETTINGS_AUDIO_PHONE_VOLUME.getValue(),
                                     newVol.toString()
@@ -423,6 +427,7 @@ private fun DockBottomBarContent() {
                         },
                         onVoiceVolumeChange = { delta ->
                             val newVol = (voiceVolume + delta).coerceIn(0, 30)
+                            voiceVolume = newVol
                             serviceManager.updateData(
                                     CarConstants.SYS_SETTINGS_AUDIO_VOICE_VOLUME.getValue(),
                                     newVol.toString()
@@ -441,23 +446,36 @@ private fun DockBottomBarContent() {
                                     CarConstants.CAR_HVAC_AUTO_ENABLE.getValue(),
                                     next
                             )
+                        },
+                        onACPowerToggle = {
+                            val next = if (hvacPower == "1") "0" else "1"
+                            serviceManager.updateData(
+                                    CarConstants.CAR_HVAC_POWER_MODE.getValue(),
+                                    next
+                            )
                         }
                 )
             }
         }
         // Alça minimizada (aparece quando a dock está fechada). Toque ou arrasto p/ cima abre.
-        AnimatedVisibility(
-                visible = !BottomBarState.isVisible,
-                modifier = Modifier.align(Alignment.BottomCenter),
-                enter = fadeIn(animationSpec = tween(180)),
-                exit = fadeOut(animationSpec = tween(70)),
-        ) {
+        // Sem animação: some instantaneamente ao abrir; ao fechar só reaparece depois
+        // que a animação de descida da dock termina.
+        var showHandle by remember { mutableStateOf(!BottomBarState.isVisible) }
+        LaunchedEffect(BottomBarState.isVisible) {
+            if (BottomBarState.isVisible) {
+                showHandle = false
+            } else {
+                kotlinx.coroutines.delay(300)
+                showHandle = true
+            }
+        }
+        if (showHandle) {
             BoxWithConstraints(
-                    modifier = Modifier.fillMaxWidth().height(72.dp),
+                    modifier = Modifier.fillMaxWidth().height(72.dp).align(Alignment.BottomCenter),
                     contentAlignment = Alignment.BottomStart,
             ) {
-                val dockWidth = (maxWidth * DOCK_WIDTH_FRACTION).coerceIn(420.dp, 900.dp)
-                val uiScale = (dockWidth / 620.dp).coerceIn(0.9f, 1.2f)
+                val dockWidth = (maxWidth * DOCK_WIDTH_FRACTION).coerceIn(504.dp, 1080.dp)
+                val uiScale = (dockWidth / 620.dp).coerceIn(1.0f, 1.45f)
                 val startPad = (10 * uiScale).dp
                 // Largura da alça visível (pequena) e da hitbox (bem maior, ~tamanho do dedo).
                 val handleWidth = (120 * uiScale).dp

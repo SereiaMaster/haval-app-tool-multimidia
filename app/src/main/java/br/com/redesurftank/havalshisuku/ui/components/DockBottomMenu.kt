@@ -50,16 +50,16 @@ private val radialTextPrimary = Color.White
 private val radialTextSecondary = Color.White.copy(alpha = 0.62f)
 private val radialTextMuted = Color.White.copy(alpha = 0.45f)
 
-private val radialTitleSize = 16.sp // títulos de secção (Clima / Som)
-private val radialValueSize = 32.sp // valores numéricos do clima (temp / ventilação) — grandes p/ tocar e arrastar
-private val radialVolumeValueSize = 26.sp // número do volume (linha arrastável)
-private val radialVolumeLabelSize = 15.sp // título de cada volume (linha arrastável)
-private val radialLabelSize = 12.sp // rótulos (Motorista / Ventilação / etc.)
-private val radialChipSize = 13.sp // texto de chips/toggles
-private val radialNavLabelSize = 11.sp // rótulos da navegação inferior
+private val radialTitleSize = 19.sp // títulos de secção (Clima / Som)
+private val radialValueSize = 38.sp // valores numéricos do clima (temp / ventilação) — grandes p/ tocar e arrastar
+private val radialVolumeValueSize = 31.sp // número do volume (linha arrastável)
+private val radialVolumeLabelSize = 18.sp // título de cada volume (linha arrastável)
+private val radialLabelSize = 14.sp // rótulos (Motorista / Ventilação / etc.)
+private val radialChipSize = 15.sp // texto de chips/toggles
+private val radialNavLabelSize = 13.sp // rótulos da navegação inferior
 
 /** Fração da largura do ecrã ocupada pela dock (responsivo head unit/emulador). */
-internal const val DOCK_WIDTH_FRACTION = 0.5f
+internal const val DOCK_WIDTH_FRACTION = 0.6f
 
 /** Superfície translúcida arredondada da dock principal. */
 private fun Modifier.dockSurface(): Modifier =
@@ -129,6 +129,7 @@ fun RadialMenuContent(
         onVoiceVolumeChange: (Int) -> Unit,
         onSyncToggle: () -> Unit,
         onAutoToggle: () -> Unit,
+        onACPowerToggle: () -> Unit,
 ) {
     val subMenu = BottomBarState.radialSubMenu
     val bodyScroll = rememberScrollState()
@@ -139,8 +140,8 @@ fun RadialMenuContent(
     ) {
         // Dock no lado do motorista (esquerda), ocupando ~50% da largura.
         // Responsiva: cresce/encolhe conforme a largura real (emulador x carro).
-        val dockWidth = (maxWidth * DOCK_WIDTH_FRACTION).coerceIn(420.dp, 900.dp)
-        val uiScale = (dockWidth / 620.dp).coerceIn(0.9f, 1.2f)
+        val dockWidth = (maxWidth * DOCK_WIDTH_FRACTION).coerceIn(504.dp, 1080.dp)
+        val uiScale = (dockWidth / 620.dp).coerceIn(1.0f, 1.45f)
         val pad = (14 * uiScale).dp
         val gap = (8 * uiScale).dp
         val cardPad = (10 * uiScale).dp
@@ -158,7 +159,7 @@ fun RadialMenuContent(
             Box(
                     modifier =
                             Modifier.fillMaxWidth()
-                                    .heightIn(max = 320.dp)
+                                    .heightIn(max = 384.dp)
                                     .verticalScroll(bodyScroll),
             ) {
                 when (subMenu) {
@@ -186,6 +187,7 @@ fun RadialMenuContent(
                                         onFanChange = onFanChange,
                                         onSyncToggle = onSyncToggle,
                                         onAutoToggle = onAutoToggle,
+                                        onACPowerToggle = onACPowerToggle,
                                 )
                                 RadialSoundPanel(
                                         modifier =
@@ -207,7 +209,7 @@ fun RadialMenuContent(
                             }
                     RadialSubMenu.Apps ->
                             Column(verticalArrangement = Arrangement.spacedBy(gap)) {
-                                Box(modifier = Modifier.height(64.dp)) { AppSwitcherSection() }
+                                Box(modifier = Modifier.height(77.dp)) { AppSwitcherSection() }
                                 DockAppsPanel(modifier = Modifier.fillMaxWidth())
                             }
                     RadialSubMenu.Driving ->
@@ -276,7 +278,7 @@ private fun RadialOuterRingButton(
         onClick: () -> Unit,
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
-        val iconSize = 46.dp
+        val iconSize = 55.dp
         Box(modifier = Modifier.size(iconSize), contentAlignment = Alignment.Center) {
             if (selected) {
                 Canvas(modifier = Modifier.matchParentSize()) {
@@ -325,7 +327,7 @@ private fun RadialOuterRingButton(
                             icon,
                             label,
                             tint = Color.White,
-                            modifier = Modifier.size(22.dp)
+                            modifier = Modifier.size(26.dp)
                     )
                 }
             }
@@ -354,18 +356,25 @@ private fun RadialClimatePanel(
         onFanChange: (Int) -> Unit,
         onSyncToggle: () -> Unit,
         onAutoToggle: () -> Unit,
+        onACPowerToggle: () -> Unit,
 ) {
     val alpha = if (isACEnabled) 1f else 0.45f
+    // Recuo lateral comum às linhas de temperatura e de ventilação, para os
+    // controles dos extremos (Motorista/Passageiro e A/C/Auto) ficarem alinhados.
+    val climateEdgePad = 8.dp
     Column(
-            modifier = modifier.alpha(alpha),
+            modifier = modifier,
             verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Text("Ar-condicionado", color = radialAccent, fontSize = radialTitleSize, fontWeight = FontWeight.Bold)
 
         // Temperaturas (motorista / passageiro) com o Sync (ícone) centralizado entre elas.
         Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                modifier =
+                        Modifier.fillMaxWidth()
+                                .padding(horizontal = climateEdgePad)
+                                .alpha(alpha),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
         ) {
             RadialTempStepper("Motorista", driverTemp, isACEnabled, onDriverTempChange)
@@ -384,13 +393,32 @@ private fun RadialClimatePanel(
 
         RadialDivider()
 
-        // Ventilação centralizada, com o Auto na mesma linha dos botões +/-.
+        // A/C no extremo esquerdo, ventilação ao centro e Auto no extremo direito.
+        // Mesmo recuo da borda usado pelos +/- das temperaturas acima.
         Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = climateEdgePad),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
         ) {
-            RadialIntStepper("Ventilação", fanSpeed, true, onFanChange) {
+            RadialIconToggle(
+                    label = "A/C",
+                    active = isACEnabled,
+                    enabled = true,
+                    icon = Icons.Default.PowerSettingsNew,
+                    contentDescription = "Ligar/desligar ar-condicionado",
+                    onClick = onACPowerToggle,
+            )
+            Box(modifier = Modifier.alpha(alpha)) {
+                RadialIntStepper(
+                        "Ventilação",
+                        fanSpeed,
+                        true,
+                        onFanChange,
+                        deferToEnd = true,
+                        range = 0..7,
+                )
+            }
+            Box(modifier = Modifier.alpha(alpha)) {
                 RadialToggleChip("Auto", acAuto == "1", isACEnabled, bumpAnd(onAutoToggle))
             }
         }
@@ -418,13 +446,13 @@ private fun RadialSoundPanel(
         Text("Volume", color = radialAccent, fontSize = radialTitleSize, fontWeight = FontWeight.Bold)
         RadialVolumeRow("Mídia", volume, onVolumeChange)
         RadialDivider()
-        RadialVolumeRow("Navegação", navVolume, onNavVolumeChange, 12.sp, 18.sp, 28.dp)
+        RadialVolumeRow("Navegação", navVolume, onNavVolumeChange, 14.sp, 22.sp, 34.dp)
         RadialDivider()
-        RadialVolumeRow("Alertas", alertVolume, onAlertVolumeChange, 12.sp, 18.sp, 28.dp)
+        RadialVolumeRow("Alertas", alertVolume, onAlertVolumeChange, 14.sp, 22.sp, 34.dp)
         RadialDivider()
-        RadialVolumeRow("Telefone", phoneVolume, onPhoneVolumeChange, 12.sp, 18.sp, 28.dp)
+        RadialVolumeRow("Telefone", phoneVolume, onPhoneVolumeChange, 14.sp, 22.sp, 34.dp)
         RadialDivider()
-        RadialVolumeRow("Voz", voiceVolume, onVoiceVolumeChange, 12.sp, 18.sp, 28.dp)
+        RadialVolumeRow("Voz", voiceVolume, onVoiceVolumeChange, 14.sp, 22.sp, 34.dp)
     }
 }
 
@@ -436,7 +464,7 @@ private fun RadialVolumeRow(
         onDelta: (Int) -> Unit,
         labelSize: TextUnit = radialVolumeLabelSize,
         valueSize: TextUnit = radialVolumeValueSize,
-        minHeight: Dp = 38.dp,
+        minHeight: Dp = 46.dp,
 ) {
     RadialDraggableValue(
             enabled = true,
@@ -504,10 +532,10 @@ private fun RadialIconToggle(
                                 1.dp,
                                 if (active && enabled) radialAccent else Color.Transparent,
                         ),
-                modifier = Modifier.size(36.dp),
+                modifier = Modifier.size(43.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(icon, contentDescription, tint = tint, modifier = Modifier.size(18.dp))
+                Icon(icon, contentDescription, tint = tint, modifier = Modifier.size(22.dp))
             }
         }
     }
@@ -534,6 +562,17 @@ private fun RadialTempStepper(
     val isAbnormal = floatTemp >= 85f || floatTemp <= -40f || floatTemp == -1f
     val displayTemp = if (!isEnabled || isAbnormal) "--" else temp
     val dragEnabled = isEnabled && displayTemp != "--"
+    // Passos de pré-visualização durante o arrasto (cada passo = 0.5°). Só aplica ao soltar.
+    var previewSteps by remember(temp) { mutableIntStateOf(0) }
+    val baseTemp = temp.toFloatOrNull() ?: 0f
+    val previewTemp = baseTemp + previewSteps * 0.5f
+    val shownColorTemp = if (previewSteps != 0) previewTemp else floatTemp
+    val shownText =
+            when {
+                displayTemp == "--" -> "--"
+                previewSteps != 0 -> String.format(java.util.Locale.US, "%.1f", previewTemp)
+                else -> displayTemp
+            }
     Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -548,17 +587,23 @@ private fun RadialTempStepper(
                     enabled = dragEnabled,
                     onIncrement = { onDelta(0.5f) },
                     onDecrement = { onDelta(-0.5f) },
+                    deferToEnd = true,
+                    onPreviewSteps = { previewSteps = it },
+                    onCommitSteps = { steps ->
+                        if (steps != 0) onDelta(steps * 0.5f)
+                        previewSteps = 0
+                    },
             ) {
                 Text(
                         buildAnnotatedString {
                             withStyle(
                                     SpanStyle(
                                             color =
-                                                    if (floatTemp > 30f) Color.Red
+                                                    if (shownColorTemp > 30f) Color.Red
                                                     else Color.White
                                     )
-                            ) { append(displayTemp) }
-                            if (displayTemp != "--") append("°")
+                            ) { append(shownText) }
+                            if (shownText != "--") append("°")
                         },
                         fontSize = radialValueSize,
                         fontWeight = FontWeight.Bold,
@@ -578,13 +623,20 @@ private fun RadialIntStepper(
         onDelta: (Int) -> Unit,
         labelSize: TextUnit = radialLabelSize,
         valueSize: TextUnit = radialValueSize,
-        buttonSize: Dp = 32.dp,
-        valueMinWidth: Dp = 70.dp,
-        valueMinHeight: Dp = 54.dp,
+        buttonSize: Dp = 38.dp,
+        valueMinWidth: Dp = 84.dp,
+        valueMinHeight: Dp = 65.dp,
         rowSpacing: Dp = 6.dp,
         labelSpacing: Dp = 2.dp,
+        deferToEnd: Boolean = false,
+        range: IntRange? = null,
         trailing: @Composable (() -> Unit)? = null,
 ) {
+    // Pré-visualização durante o arrasto; só aplica ao soltar (1 comando ao carro).
+    var previewSteps by remember(value) { mutableIntStateOf(0) }
+    val shownValue =
+            if (range != null) (value + previewSteps).coerceIn(range.first, range.last)
+            else value + previewSteps
     Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(labelSpacing),
@@ -601,9 +653,19 @@ private fun RadialIntStepper(
                     onDecrement = { onDelta(-1) },
                     minWidth = valueMinWidth,
                     minHeight = valueMinHeight,
+                    deferToEnd = deferToEnd,
+                    onPreviewSteps = { previewSteps = it },
+                    onCommitSteps = { steps ->
+                        val target =
+                                if (range != null)
+                                        (value + steps).coerceIn(range.first, range.last)
+                                else value + steps
+                        if (target != value) onDelta(target - value)
+                        previewSteps = 0
+                    },
             ) {
                 Text(
-                        value.toString(),
+                        shownValue.toString(),
                         fontSize = valueSize,
                         fontWeight = FontWeight.Bold,
                         color = radialTextPrimary
@@ -622,8 +684,8 @@ private fun RadialIntStepper(
 private fun RadialMiniButton(
         enabled: Boolean,
         icon: ImageVector,
-        size: Dp = 32.dp,
-        iconSize: Dp = 16.dp,
+        size: Dp = 38.dp,
+        iconSize: Dp = 19.dp,
         onClick: () -> Unit,
 ) {
     Surface(
@@ -649,8 +711,11 @@ private fun RadialDraggableValue(
         onIncrement: () -> Unit,
         onDecrement: () -> Unit,
         modifier: Modifier = Modifier,
-        minWidth: Dp = 70.dp,
-        minHeight: Dp = 54.dp,
+        minWidth: Dp = 84.dp,
+        minHeight: Dp = 65.dp,
+        deferToEnd: Boolean = false,
+        onPreviewSteps: (Int) -> Unit = {},
+        onCommitSteps: (Int) -> Unit = {},
         content: @Composable () -> Unit,
 ) {
     val playSound = rememberRadialAdjustSound()
@@ -658,6 +723,8 @@ private fun RadialDraggableValue(
     val pxPerStep = with(LocalDensity.current) { 9.dp.toPx() }
     val onInc by rememberUpdatedState(onIncrement)
     val onDec by rememberUpdatedState(onDecrement)
+    val onPreview by rememberUpdatedState(onPreviewSteps)
+    val onCommit by rememberUpdatedState(onCommitSteps)
     val sound by rememberUpdatedState(playSound)
 
     Box(
@@ -670,37 +737,53 @@ private fun RadialDraggableValue(
                                 scaleX = if (dragging) 1.05f else 1f
                                 scaleY = if (dragging) 1.05f else 1f
                             }
-                            .pointerInput(enabled, pxPerStep) {
+                            .pointerInput(enabled, pxPerStep, deferToEnd) {
                                 if (!enabled) return@pointerInput
                                 var pending = 0f
+                                var netSteps = 0
                                 val velocityTracker = VelocityTracker()
                                 detectHorizontalDragGestures(
                                         onDragStart = {
                                             BottomBarState.bumpRadialActivity()
                                             pending = 0f
+                                            netSteps = 0
                                             velocityTracker.resetTracking()
                                             dragging = true
+                                            if (deferToEnd) onPreview(0)
                                         },
                                         onDragEnd = {
                                             dragging = false
-                                            val velocity = velocityTracker.calculateVelocity().x
-                                            val bonus =
-                                                    (kotlin.math.abs(velocity) / 1200f)
-                                                            .toInt()
-                                                            .coerceIn(0, 3)
-                                            repeat(bonus) {
-                                                if (velocity > 0) {
-                                                    onInc()
-                                                    sound()
-                                                    BottomBarState.bumpRadialActivity()
-                                                } else if (velocity < 0) {
-                                                    onDec()
-                                                    sound()
-                                                    BottomBarState.bumpRadialActivity()
+                                            if (deferToEnd) {
+                                                // Aplica de uma só vez ao soltar (1 comando ao carro).
+                                                onCommit(netSteps)
+                                                netSteps = 0
+                                            } else {
+                                                val velocity =
+                                                        velocityTracker.calculateVelocity().x
+                                                val bonus =
+                                                        (kotlin.math.abs(velocity) / 1200f)
+                                                                .toInt()
+                                                                .coerceIn(0, 3)
+                                                repeat(bonus) {
+                                                    if (velocity > 0) {
+                                                        onInc()
+                                                        sound()
+                                                        BottomBarState.bumpRadialActivity()
+                                                    } else if (velocity < 0) {
+                                                        onDec()
+                                                        sound()
+                                                        BottomBarState.bumpRadialActivity()
+                                                    }
                                                 }
                                             }
                                         },
-                                        onDragCancel = { dragging = false },
+                                        onDragCancel = {
+                                            dragging = false
+                                            if (deferToEnd) {
+                                                onPreview(0)
+                                                netSteps = 0
+                                            }
+                                        },
                                         onHorizontalDrag = { change, dragAmount ->
                                             change.consume()
                                             velocityTracker.addPosition(
@@ -709,13 +792,23 @@ private fun RadialDraggableValue(
                                             )
                                             pending += dragAmount
                                             while (pending <= -pxPerStep) {
-                                                onDec()
+                                                if (deferToEnd) {
+                                                    netSteps -= 1
+                                                    onPreview(netSteps)
+                                                } else {
+                                                    onDec()
+                                                }
                                                 sound()
                                                 BottomBarState.bumpRadialActivity()
                                                 pending += pxPerStep
                                             }
                                             while (pending >= pxPerStep) {
-                                                onInc()
+                                                if (deferToEnd) {
+                                                    netSteps += 1
+                                                    onPreview(netSteps)
+                                                } else {
+                                                    onInc()
+                                                }
                                                 sound()
                                                 BottomBarState.bumpRadialActivity()
                                                 pending -= pxPerStep
@@ -808,6 +901,7 @@ private fun RadialMenuPreview() {
                     onVoiceVolumeChange = {},
                     onSyncToggle = {},
                     onAutoToggle = {},
+                    onACPowerToggle = {},
             )
         }
     }
@@ -855,6 +949,7 @@ private fun RadialMenuAppsPreview() {
                     onVoiceVolumeChange = {},
                     onSyncToggle = {},
                     onAutoToggle = {},
+                    onACPowerToggle = {},
             )
         }
     }
