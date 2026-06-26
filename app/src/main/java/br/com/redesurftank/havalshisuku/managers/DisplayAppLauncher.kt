@@ -496,11 +496,7 @@ object DisplayAppLauncher {
     private fun getOverscanForPackage(packageName: String): Int {
         val prefs = getPrefs()
         val density = App.getContext().resources.displayMetrics.density
-
-        if (!BottomBarState.isVisible) {
-            return 0
-        }
-
+        
         // Priority 1: Dynamic Overrides from SharedPreferences (User defined)
         val overridesJson = prefs.getString(SharedPreferencesKeys.BOTTOM_BAR_OVERRIDES.key, null)
         if (overridesJson != null) {
@@ -531,15 +527,9 @@ object DisplayAppLauncher {
         }
         if (hardcodedOverscan != null) return (hardcodedOverscan * density).toInt()
 
-        // Priority 3: Global default — 0 in prefs means “no value”; use bar height (dp) so stacks match wm overscan
-        val globalDefaultRaw = prefs.getInt(SharedPreferencesKeys.PERSISTENT_BOTTOM_BAR_OVERSCAN.key, 0)
-        val globalDefaultDp =
-                if (globalDefaultRaw <= 0) {
-                    60
-                } else {
-                    globalDefaultRaw
-                }
-        return (globalDefaultDp * density).toInt()
+        // Priority 3: Global Default
+        val globalDefault = prefs.getInt(SharedPreferencesKeys.PERSISTENT_BOTTOM_BAR_OVERSCAN.key, 0)
+        return (globalDefault * density).toInt()
     }
 
     fun isAnyAppOnDisplay(displayId: Int): Boolean {

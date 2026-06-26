@@ -27,9 +27,11 @@ import java.util.regex.Pattern;
 import br.com.redesurftank.App;
 import br.com.redesurftank.havalshisuku.broadcastReceivers.DispatchAllDatasReceiver;
 import br.com.redesurftank.havalshisuku.broadcastReceivers.RestartReceiver;
+import br.com.redesurftank.havalshisuku.managers.CarMockManager;
 import br.com.redesurftank.havalshisuku.managers.ServiceManager;
 import br.com.redesurftank.havalshisuku.models.CommandListener;
 import br.com.redesurftank.havalshisuku.models.SharedPreferencesKeys;
+import br.com.redesurftank.havalshisuku.utils.EmulatorUtils;
 import br.com.redesurftank.havalshisuku.utils.IPTablesUtils;
 import br.com.redesurftank.havalshisuku.utils.ShizukuUtils;
 import br.com.redesurftank.havalshisuku.utils.TelnetClientWrapper;
@@ -90,11 +92,20 @@ public class ForegroundService extends Service implements Shizuku.OnBinderDeadLi
             if (sharedPreferences.getBoolean(SharedPreferencesKeys.PERSISTENT_BOTTOM_BAR.getKey(), false)) {
                 if (android.provider.Settings.canDrawOverlays(this)) {
                     Log.w(TAG, "Starting persistent bottom bar...");
-                    Intent bottomBarIntent = new Intent(this, br.com.redesurftank.havalshisuku.services.BottomBarService.class);
-                    startService(bottomBarIntent);
+                    try {
+                        Intent bottomBarIntent = new Intent(this, br.com.redesurftank.havalshisuku.services.BottomBarService.class);
+                        startService(bottomBarIntent);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to start persistent bottom bar", e);
+                    }
                 } else {
                     Log.e(TAG, "Overlay permission not granted, skipping persistent bottom bar.");
                 }
+            }
+
+            final boolean runningOnEmulator = EmulatorUtils.isEmulator();
+            if (runningOnEmulator) {
+                Log.w(TAG, "Emulator detected — skipping car-specific installation integrity check.");
             }
 
             // Checar se precisa resetar dados (rollback preview→estável)
@@ -118,7 +129,7 @@ public class ForegroundService extends Service implements Shizuku.OnBinderDeadLi
                 }
             }
 
-            if (!sharedPreferences.getBoolean(SharedPreferencesKeys.SELF_INSTALLATION_INTEGRITY_CHECK.getKey(), false) && !sharedPreferences.getBoolean(SharedPreferencesKeys.BYPASS_SELF_INSTALLATION_INTEGRITY_CHECK.getKey(), false)) {
+            if (!runningOnEmulator && !sharedPreferences.getBoolean(SharedPreferencesKeys.SELF_INSTALLATION_INTEGRITY_CHECK.getKey(), false) && !sharedPreferences.getBoolean(SharedPreferencesKeys.BYPASS_SELF_INSTALLATION_INTEGRITY_CHECK.getKey(), false)) {
                 try {
                     var selfPackageInfo = context.getPackageManager().getApplicationInfo(context.getPackageName(), 0);
                     if (selfPackageInfo.uid > 10999) {
@@ -136,6 +147,18 @@ public class ForegroundService extends Service implements Shizuku.OnBinderDeadLi
             }
 
 
+            if (CarMockManager.isEnabled(context)) {
+                Log.w(TAG, "Local car mock enabled — skipping Shizuku/telnet bootstrap");
+                isShizukuInitialized = true;
+                backgroundHandler.post(() -> {
+                    if (!ServiceManager.getInstance().isServicesInitialized()) {
+                        ServiceManager.getInstance().initializeServices(getApplicationContext());
+                    }
+                });
+                return START_STICKY;
+            }
+
+            if (!runningOnEmulator) {
             backgroundHandler.post(new Runnable() {
                 @Override
                 public void run() {
@@ -185,6 +208,9 @@ public class ForegroundService extends Service implements Shizuku.OnBinderDeadLi
                     }
                 }
             });
+            } else {
+                Log.w(TAG, "Emulator detected — skipping telnet/Shizuku auto-start.");
+            }
         } catch (Exception e) {
             Log.e(TAG, "Error in onStartCommand: " + e.getMessage(), e);
             isServiceRunning = false; // Marca o serviço como não rodando em caso de erro

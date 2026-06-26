@@ -12,7 +12,8 @@ enum class SteeringWheelCustomActionType(val key: String, val description: Strin
     TOGGLE_ONE_PEDAL_DRIVING("toggle_one_pedal_driving", "Alternar condução com um pedal."),
     OPEN_APP("open_app", "Abrir aplicativo de sua escolha."),
     TOGGLE_CAMERA_AVM("toggle_avm", "Alternar o modo de desabilitar a camera com o carro parado."),
-    OPEN_AVM_ONCE("open_avm_once", "Abrir a camera sem interrupções.");
+    OPEN_AVM_ONCE("open_avm_once", "Abrir a camera sem interrupções."),
+    TOGGLE_BOTTOM_BAR("toggle_bottom_bar", "Exibir ou ocultar a barra/dock de rápido acesso.");
 
     companion object {
         fun fromKey(key: String): SteeringWheelCustomActionType? {

@@ -1,13 +1,12 @@
 package br.com.redesurftank.havalshisuku.ui.components
 
 import android.content.Context
-import android.util.Log
 import android.view.MotionEvent
-import android.view.SoundEffectConstants
+import android.util.Log
 import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
@@ -20,7 +19,6 @@ import androidx.compose.ui.*
 import androidx.compose.ui.draw.*
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -48,7 +46,7 @@ private val commonTextStyle =
                 letterSpacing = 0.5.sp
         )
 
-private val labelStyle =
+val labelStyle =
         TextStyle(
                 color = Color.LightGray,
                 fontSize = 10.sp,
@@ -86,6 +84,38 @@ fun BottomBarContent() {
         mutableIntStateOf(
                 serviceManager
                         .getData(CarConstants.SYS_SETTINGS_AUDIO_MEDIA_VOLUME.getValue())
+                        ?.toIntOrNull()
+                        ?: 0
+        )
+    }
+    var navVolume by remember {
+        mutableIntStateOf(
+                serviceManager
+                        .getData(CarConstants.SYS_SETTINGS_AUDIO_NAVI_VOLUME.getValue())
+                        ?.toIntOrNull()
+                        ?: 0
+        )
+    }
+    var alertVolume by remember {
+        mutableIntStateOf(
+                serviceManager
+                        .getData(CarConstants.SYS_SETTINGS_AUDIO_RING_VOLUME.getValue())
+                        ?.toIntOrNull()
+                        ?: 0
+        )
+    }
+    var phoneVolume by remember {
+        mutableIntStateOf(
+                serviceManager
+                        .getData(CarConstants.SYS_SETTINGS_AUDIO_PHONE_VOLUME.getValue())
+                        ?.toIntOrNull()
+                        ?: 0
+        )
+    }
+    var voiceVolume by remember {
+        mutableIntStateOf(
+                serviceManager
+                        .getData(CarConstants.SYS_SETTINGS_AUDIO_VOICE_VOLUME.getValue())
                         ?.toIntOrNull()
                         ?: 0
         )
@@ -143,6 +173,14 @@ fun BottomBarContent() {
                             CarConstants.CAR_HVAC_PASS_TEMPERATURE.getValue() -> passTemp = value
                             CarConstants.SYS_SETTINGS_AUDIO_MEDIA_VOLUME.getValue() ->
                                     volume = value.toIntOrNull() ?: volume
+                            CarConstants.SYS_SETTINGS_AUDIO_NAVI_VOLUME.getValue() ->
+                                    navVolume = value.toIntOrNull() ?: navVolume
+                            CarConstants.SYS_SETTINGS_AUDIO_RING_VOLUME.getValue() ->
+                                    alertVolume = value.toIntOrNull() ?: alertVolume
+                            CarConstants.SYS_SETTINGS_AUDIO_PHONE_VOLUME.getValue() ->
+                                    phoneVolume = value.toIntOrNull() ?: phoneVolume
+                            CarConstants.SYS_SETTINGS_AUDIO_VOICE_VOLUME.getValue() ->
+                                    voiceVolume = value.toIntOrNull() ?: voiceVolume
                             CarConstants.CAR_EV_SETTING_POWER_MODEL_CONFIG.getValue() ->
                                     powerModel = value
                             CarConstants.CAR_EV_SETTING_ENERGY_RECOVERY_LEVEL.getValue() ->
@@ -163,251 +201,469 @@ fun BottomBarContent() {
         onDispose { serviceManager.removeDataChangedListener(listener) }
     }
 
-    Box(
-            modifier =
-                    Modifier.fillMaxWidth().height(100.dp),
-            contentAlignment = Alignment.BottomCenter
-    ) {
-        if (BottomBarState.isVisible) {
-            Surface(
-                    modifier = Modifier.fillMaxWidth().height(60.dp)
-                        // Swipe-down gesture: if user drags down > 30dp, hide the bar.
-                        // Taps and small movements pass through to buttons untouched.
-                        .pointerInput(Unit) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    val down = awaitFirstDown(requireUnconsumed = false)
-                                    var totalDragY = 0f
+    val isACEnabled = hvacPower == "1"
 
-                                    do {
-                                        val event = awaitPointerEvent()
-                                        val change = event.changes.first()
-                                        totalDragY += change.position.y - change.previousPosition.y
-
-                                        // Confirmed downward swipe past bottom → hide bar
-                                        if (totalDragY > 30f) {
-                                            event.changes.forEach { it.consume() }
-                                            // Consume remaining pointer events
-                                            do {
-                                                val ev2 = awaitPointerEvent()
-                                                ev2.changes.forEach { it.consume() }
-                                            } while (ev2.changes.any { it.pressed })
-                                            BottomBarState.isVisible = false
-                                            break
-                                        }
-                                    } while (event.changes.any { it.pressed })
-                                    // If finger lifted without crossing threshold → do nothing (button handles it)
-                                }
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+        // Transição: a dock/barra sobe ao abrir e desce ao fechar.
+        AnimatedVisibility(
+                visible = BottomBarState.isVisible,
+                modifier = Modifier.align(Alignment.BottomCenter),
+                enter =
+                        slideInVertically(animationSpec = tween(280)) { it } +
+                                fadeIn(animationSpec = tween(220)),
+                exit =
+                        slideOutVertically(animationSpec = tween(260)) { it } +
+                                fadeOut(animationSpec = tween(200)),
+        ) {
+            if (BottomBarState.useLegacyBottomBar) {
+                LegacyBottomBar(
+                        serviceManager = serviceManager,
+                        scope = scope,
+                        driverTemp = driverTemp,
+                        passTemp = passTemp,
+                        volume = volume,
+                        fanSpeed = fanSpeed,
+                        hvacPower = hvacPower,
+                        acSync = acSync,
+                        acAuto = acAuto,
+                )
+            } else {
+            Box(
+                    modifier =
+                            Modifier.fillMaxWidth()
+                                    .wrapContentHeight()
+                                    .align(Alignment.BottomCenter)
+            ) {
+                RadialMenuContent(
+                        scope = scope,
+                        driverTemp = driverTemp,
+                        passTemp = passTemp,
+                        volume = volume,
+                        navVolume = navVolume,
+                        alertVolume = alertVolume,
+                        phoneVolume = phoneVolume,
+                        voiceVolume = voiceVolume,
+                        fanSpeed = fanSpeed,
+                        isACEnabled = isACEnabled,
+                        acSync = acSync,
+                        acAuto = acAuto,
+                        driveMode = driveMode,
+                        powerModel = powerModel,
+                        energyRecovery = energyRecovery,
+                        steeringMode = steeringMode,
+                        onDriverTempChange = { delta ->
+                            val newTemp = (driverTemp.toFloatOrNull() ?: 22.0f) + delta
+                            serviceManager.updateData(
+                                    CarConstants.CAR_HVAC_DRIVER_TEMPERATURE.getValue(),
+                                    String.format(java.util.Locale.US, "%.1f", newTemp)
+                            )
+                        },
+                        onPassTempChange = { delta ->
+                            val newTemp = (passTemp.toFloatOrNull() ?: 22.0f) + delta
+                            serviceManager.updateData(
+                                    CarConstants.CAR_HVAC_PASS_TEMPERATURE.getValue(),
+                                    String.format(java.util.Locale.US, "%.1f", newTemp)
+                            )
+                        },
+                        onFanChange = { delta ->
+                            val calculatedSpeed = (fanSpeed + delta).coerceIn(0, 7)
+                            serviceManager.updateData(
+                                    CarConstants.CAR_HVAC_FAN_SPEED.getValue(),
+                                    calculatedSpeed.toString()
+                            )
+                            if (calculatedSpeed == 0 && hvacPower == "1") {
+                                serviceManager.updateData(
+                                        CarConstants.CAR_HVAC_POWER_MODE.getValue(),
+                                        "0"
+                                )
+                            } else if (calculatedSpeed > 0 && hvacPower == "0") {
+                                serviceManager.updateData(
+                                        CarConstants.CAR_HVAC_POWER_MODE.getValue(),
+                                        "1"
+                                )
                             }
                         },
-                    color = Color.Black,
-                    shape = RoundedCornerShape(topStart = 0.dp, topEnd = 0.dp),
-                    tonalElevation = 0.dp
+                        onVolumeChange = { delta ->
+                            val newVol = (volume + delta).coerceIn(0, 30)
+                            serviceManager.updateData(
+                                    CarConstants.SYS_SETTINGS_AUDIO_MEDIA_VOLUME.getValue(),
+                                    newVol.toString()
+                            )
+                        },
+                        onNavVolumeChange = { delta ->
+                            val newVol = (navVolume + delta).coerceIn(0, 30)
+                            serviceManager.updateData(
+                                    CarConstants.SYS_SETTINGS_AUDIO_NAVI_VOLUME.getValue(),
+                                    newVol.toString()
+                            )
+                        },
+                        onAlertVolumeChange = { delta ->
+                            val newVol = (alertVolume + delta).coerceIn(0, 30)
+                            serviceManager.updateData(
+                                    CarConstants.SYS_SETTINGS_AUDIO_RING_VOLUME.getValue(),
+                                    newVol.toString()
+                            )
+                        },
+                        onPhoneVolumeChange = { delta ->
+                            val newVol = (phoneVolume + delta).coerceIn(0, 30)
+                            serviceManager.updateData(
+                                    CarConstants.SYS_SETTINGS_AUDIO_PHONE_VOLUME.getValue(),
+                                    newVol.toString()
+                            )
+                        },
+                        onVoiceVolumeChange = { delta ->
+                            val newVol = (voiceVolume + delta).coerceIn(0, 30)
+                            serviceManager.updateData(
+                                    CarConstants.SYS_SETTINGS_AUDIO_VOICE_VOLUME.getValue(),
+                                    newVol.toString()
+                            )
+                        },
+                        onSyncToggle = {
+                            val next = if (acSync == "1") "0" else "1"
+                            serviceManager.updateData(
+                                    CarConstants.CAR_HVAC_SYNC_ENABLE.getValue(),
+                                    next
+                            )
+                        },
+                        onAutoToggle = {
+                            val next = if (acAuto == "1") "0" else "1"
+                            serviceManager.updateData(
+                                    CarConstants.CAR_HVAC_AUTO_ENABLE.getValue(),
+                                    next
+                            )
+                        }
+                )
+            }
+            }
+        }
+        // Alça minimizada (aparece quando a dock está fechada).
+        // Sai com um fade bem rápido (sem deslocamento) ao abrir a dock.
+        AnimatedVisibility(
+                visible = !BottomBarState.isVisible,
+                modifier = Modifier.align(Alignment.BottomCenter),
+                enter = fadeIn(animationSpec = tween(180)),
+                exit = fadeOut(animationSpec = tween(70)),
+        ) {
+            // Estado minimizado: apenas uma "alça" visível, centralizada sob a dock
+            // (lado do motorista), para não cobrir os ícones centrais do Android Auto.
+            // Toque OU arrasto para cima abre a dock.
+            BoxWithConstraints(
+                    modifier = Modifier.fillMaxWidth().height(60.dp),
+                    contentAlignment = Alignment.BottomStart,
             ) {
-                // Use BoxWithConstraints to get actual measured width
-                androidx.compose.foundation.layout.BoxWithConstraints(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.CenterEnd
-                ) {
-                    val density = androidx.compose.ui.platform.LocalDensity.current.density
-                    val actualWidthPx = constraints.maxWidth
-                    
-                    // Dynamic padding: 150px when full 1920px, reduced when narrower
-                    // Threshold: 1820px (= 1920 - 100). Below this, no padding.
-                    val thresholdPx = (1820 * density).toInt()
-                    val compensationPx = (actualWidthPx - thresholdPx).coerceAtLeast(0)
-                    val horizontalOffsetCompensation = (compensationPx / density).dp
-                    
-                    // Troubleshoot logging
-                    android.util.Log.d("BottomBarUI", "Width - " +
-                        "ActualWidthPx: $actualWidthPx, " +
-                        "Density: $density, " +
-                        "ThresholdPx: $thresholdPx, " +
-                        "CompensationPx: $compensationPx, " +
-                        "PaddingDp: $horizontalOffsetCompensation")
-                    
-                    Row(
-                            modifier =
-                                    Modifier.fillMaxWidth()
-                                            .fillMaxHeight()
-                                            .padding(start = horizontalOffsetCompensation, end = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // 1. App Switcher (11%)
-                        Box(modifier = Modifier.weight(0.11f)) { AppSwitcherSection() }
+                val dockWidth = (maxWidth * DOCK_WIDTH_FRACTION).coerceIn(420.dp, 900.dp)
+                val uiScale = (dockWidth / 620.dp).coerceIn(0.9f, 1.2f)
+                val startPad = (10 * uiScale).dp
+                val handleWidth = (120 * uiScale).dp
+                val handleStart =
+                        (startPad + dockWidth / 2 - handleWidth / 2).coerceAtLeast(0.dp)
 
-                        val isACEnabled = hvacPower == "1"
-
-                        // 2. AC Driver (14%)
-                        Box(modifier = Modifier.weight(0.14f), contentAlignment = Alignment.Center) {
-                            TempControlSection("Motorista", driverTemp, isACEnabled) { delta ->
-                                val newTemp = (driverTemp.toFloatOrNull() ?: 22.0f) + delta
-                                serviceManager.updateData(
-                                        CarConstants.CAR_HVAC_DRIVER_TEMPERATURE.getValue(),
-                                        String.format(java.util.Locale.US, "%.1f", newTemp)
-                                )
-                            }
-                        }
-
-                        // 3. Controls Group (Back, Settings) (14%)
-                        Box(modifier = Modifier.weight(0.14f), contentAlignment = Alignment.Center) {
-                            ControlsSection(scope)
-                        }
-
-                        // 4. AC Fan Speed (14%)
-                        Box(modifier = Modifier.weight(0.14f), contentAlignment = Alignment.Center) {
-                            FanControlSection(fanSpeed, true) { delta ->
-                                val calculatedSpeed = (fanSpeed + delta).coerceIn(0, 7)
-                                serviceManager.updateData(
-                                        CarConstants.CAR_HVAC_FAN_SPEED.getValue(),
-                                        calculatedSpeed.toString()
-                                )
-
-                                if (calculatedSpeed == 0 && hvacPower == "1") {
-                                    serviceManager.updateData(
-                                            CarConstants.CAR_HVAC_POWER_MODE.getValue(),
-                                            "0"
-                                    )
-                                } else if (calculatedSpeed > 0 && hvacPower == "0") {
-                                    serviceManager.updateData(
-                                            CarConstants.CAR_HVAC_POWER_MODE.getValue(),
-                                            "1"
-                                    )
-                                }
-                            }
-                        }
-
-                        // 5. AC Sync/Auto (14%)
-                        Box(modifier = Modifier.weight(0.14f), contentAlignment = Alignment.Center) {
-                            Row(
-                                    horizontalArrangement = Arrangement.spacedBy(20.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                ACControlButton(
-                                        icon = Icons.Default.Sync,
-                                        label = "Sync",
-                                        isActive = acSync == "1",
-                                        isEnabled = isACEnabled
-                                ) {
-                                    val next = if (acSync == "1") "0" else "1"
-                                    serviceManager.updateData(
-                                            CarConstants.CAR_HVAC_SYNC_ENABLE.getValue(),
-                                            next
-                                    )
-                                }
-                                ACControlButton(
-                                        icon = Icons.Default.AutoMode,
-                                        label = "Auto",
-                                        isActive = acAuto == "1",
-                                        isEnabled = isACEnabled
-                                ) {
-                                    val next = if (acAuto == "1") "0" else "1"
-                                    serviceManager.updateData(
-                                            CarConstants.CAR_HVAC_AUTO_ENABLE.getValue(),
-                                            next
-                                    )
-                                }
-                            }
-                        }
-
-                        // 6. Volume (14%)
-                        Box(modifier = Modifier.weight(0.14f), contentAlignment = Alignment.Center) {
-                            VolumeControlSection(label = "Volume", volume) { delta ->
-                                val newVol = (volume + delta).coerceIn(0, 30)
-                                serviceManager.updateData(
-                                        CarConstants.SYS_SETTINGS_AUDIO_MEDIA_VOLUME.getValue(),
-                                        newVol.toString()
-                                )
-                            }
-                        }
-
-                        // 7. AC Passenger (14%)
-                        Box(modifier = Modifier.weight(0.14f), contentAlignment = Alignment.Center) {
-                            TempControlSection("Passageiro", passTemp, isACEnabled) { delta ->
-                                val newTemp = (passTemp.toFloatOrNull() ?: 22.0f) + delta
-                                serviceManager.updateData(
-                                        CarConstants.CAR_HVAC_PASS_TEMPERATURE.getValue(),
-                                        String.format(java.util.Locale.US, "%.1f", newTemp)
-                                )
-                            }
-                        }
-
-                        // 8. Override Section (5%)
-                        Box(
-                                modifier = Modifier.weight(0.05f)
-                                    // Use raw pointerInput instead of IconButton/clickable
-                                    // so it works even in YouTube immersive mode where the
-                                    // system gesture navigation consumes touch events.
-                                    .pointerInput(Unit) {
-                                        awaitPointerEventScope {
-                                            while (true) {
-                                                val down = awaitFirstDown(requireUnconsumed = false)
-                                                // Wait for finger lift
-                                                var totalDrag = 0f
-                                                do {
-                                                    val event = awaitPointerEvent()
-                                                    val change = event.changes.first()
-                                                    totalDrag += (change.position - change.previousPosition).getDistance()
-                                                } while (event.changes.any { it.pressed })
-                                                // Only trigger if it was a tap (not a drag)
-                                                if (totalDrag < 30f) {
-                                                    android.util.Log.e("OVERSCAN_DEBUG", "Icon Clicked! Current State: ${BottomBarState.isOverrideMenuExpanded}")
-                                                    BottomBarState.isOverrideMenuExpanded =
-                                                            !BottomBarState.isOverrideMenuExpanded
-                                                    if (BottomBarState.isOverrideMenuExpanded) {
-                                                        BottomBarState.isMenuExpanded = false
-                                                        BottomBarState.isSettingsMenuExpanded = false
+                Box(
+                        modifier =
+                                Modifier.padding(start = handleStart)
+                                        .width(handleWidth)
+                                        .height(34.dp)
+                                        .pointerInput(Unit) {
+                                            awaitPointerEventScope {
+                                                while (true) {
+                                                    awaitFirstDown(requireUnconsumed = false)
+                                                    var totalDragY = 0f
+                                                    var totalMove = 0f
+                                                    var opened = false
+                                                    do {
+                                                        val event = awaitPointerEvent()
+                                                        val change = event.changes.first()
+                                                        totalDragY +=
+                                                                change.position.y -
+                                                                        change.previousPosition.y
+                                                        totalMove +=
+                                                                (change.position -
+                                                                                change.previousPosition)
+                                                                        .getDistance()
+                                                        if (totalDragY < -24f) {
+                                                            event.changes.forEach { it.consume() }
+                                                            do {
+                                                                val ev2 = awaitPointerEvent()
+                                                                ev2.changes.forEach {
+                                                                    it.consume()
+                                                                }
+                                                            } while (ev2.changes.any { it.pressed })
+                                                            BottomBarState.openRadialMenu()
+                                                            opened = true
+                                                            break
+                                                        }
+                                                    } while (event.changes.any { it.pressed })
+                                                    // Toque simples (sem arrasto) também abre.
+                                                    if (!opened && totalMove <= 24f) {
+                                                        BottomBarState.openRadialMenu()
                                                     }
-                                                    android.util.Log.e("OVERSCAN_DEBUG", "New State: ${BottomBarState.isOverrideMenuExpanded}")
                                                 }
                                             }
+                                        },
+                        contentAlignment = Alignment.BottomCenter,
+                ) {
+                    Box(
+                            modifier =
+                                    Modifier.padding(bottom = 8.dp)
+                                            .fillMaxWidth()
+                                            .height(8.dp)
+                                            .background(
+                                                    Color.White.copy(alpha = 0.75f),
+                                                    RoundedCornerShape(4.dp),
+                                            )
+                                            .border(
+                                                    1.dp,
+                                                    Color.Black.copy(alpha = 0.35f),
+                                                    RoundedCornerShape(4.dp),
+                                            )
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Barra inferior antiga (horizontal), preservada como opção selecionável nos parâmetros.
+ * Reutiliza os mesmos controlos da versão clássica.
+ */
+@Composable
+private fun LegacyBottomBar(
+        serviceManager: br.com.redesurftank.havalshisuku.managers.ServiceManager,
+        scope: CoroutineScope,
+        driverTemp: String,
+        passTemp: String,
+        volume: Int,
+        fanSpeed: Int,
+        hvacPower: String,
+        acSync: String,
+        acAuto: String,
+) {
+    val isACEnabled = hvacPower == "1"
+    Box(
+            modifier = Modifier.fillMaxWidth().height(100.dp),
+            contentAlignment = Alignment.BottomCenter,
+    ) {
+        Surface(
+                modifier =
+                        Modifier.fillMaxWidth()
+                                .height(60.dp)
+                                .pointerInput(Unit) {
+                                    awaitPointerEventScope {
+                                        while (true) {
+                                            awaitFirstDown(requireUnconsumed = false)
+                                            var totalDragY = 0f
+                                            do {
+                                                val event = awaitPointerEvent()
+                                                val change = event.changes.first()
+                                                totalDragY +=
+                                                        change.position.y -
+                                                                change.previousPosition.y
+                                                if (totalDragY > 30f) {
+                                                    event.changes.forEach { it.consume() }
+                                                    do {
+                                                        val ev2 = awaitPointerEvent()
+                                                        ev2.changes.forEach { it.consume() }
+                                                    } while (ev2.changes.any { it.pressed })
+                                                    BottomBarState.hideRadialMenu()
+                                                    break
+                                                }
+                                            } while (event.changes.any { it.pressed })
                                         }
-                                    },
-                                contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.SwapVert,
-                                contentDescription = null,
-                                tint = Color.White.copy(alpha = 0.8f)
+                                    }
+                                },
+                color = Color.Black,
+                shape = RoundedCornerShape(topStart = 0.dp, topEnd = 0.dp),
+                tonalElevation = 0.dp,
+        ) {
+            Row(
+                    modifier = Modifier.fillMaxWidth().fillMaxHeight().padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(modifier = Modifier.weight(0.11f)) { AppSwitcherSection() }
+
+                Box(modifier = Modifier.weight(0.14f), contentAlignment = Alignment.Center) {
+                    TempControlSection("Motorista", driverTemp, isACEnabled) { delta ->
+                        val newTemp = (driverTemp.toFloatOrNull() ?: 22.0f) + delta
+                        serviceManager.updateData(
+                                CarConstants.CAR_HVAC_DRIVER_TEMPERATURE.getValue(),
+                                String.format(java.util.Locale.US, "%.1f", newTemp),
+                        )
+                    }
+                }
+
+                Box(modifier = Modifier.weight(0.14f), contentAlignment = Alignment.Center) {
+                    ControlsSection(scope)
+                }
+
+                Box(modifier = Modifier.weight(0.14f), contentAlignment = Alignment.Center) {
+                    FanControlSection(fanSpeed, true) { delta ->
+                        val calculatedSpeed = (fanSpeed + delta).coerceIn(0, 7)
+                        serviceManager.updateData(
+                                CarConstants.CAR_HVAC_FAN_SPEED.getValue(),
+                                calculatedSpeed.toString(),
+                        )
+                        if (calculatedSpeed == 0 && hvacPower == "1") {
+                            serviceManager.updateData(
+                                    CarConstants.CAR_HVAC_POWER_MODE.getValue(),
+                                    "0",
+                            )
+                        } else if (calculatedSpeed > 0 && hvacPower == "0") {
+                            serviceManager.updateData(
+                                    CarConstants.CAR_HVAC_POWER_MODE.getValue(),
+                                    "1",
                             )
                         }
                     }
                 }
-            }
-        } else {
-            Box(
-                    modifier =
-                            Modifier.fillMaxWidth()
-                                    .height(60.dp)
-                                    .align(Alignment.BottomCenter)
-                                    .background(Color.Transparent)
-                                    // Swipe-up gesture: if user drags upward > 30dp, show the bar
-                                    .pointerInput(Unit) {
-                                        awaitPointerEventScope {
-                                            while (true) {
-                                                val down = awaitFirstDown(requireUnconsumed = false)
-                                                var totalDragY = 0f
 
-                                                do {
-                                                    val event = awaitPointerEvent()
-                                                    val change = event.changes.first()
-                                                    totalDragY += change.position.y - change.previousPosition.y
+                Box(modifier = Modifier.weight(0.14f), contentAlignment = Alignment.Center) {
+                    Row(
+                            horizontalArrangement = Arrangement.spacedBy(20.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ACControlButton(
+                                icon = Icons.Default.Sync,
+                                label = "Sync",
+                                isActive = acSync == "1",
+                                isEnabled = isACEnabled,
+                        ) {
+                            val next = if (acSync == "1") "0" else "1"
+                            serviceManager.updateData(
+                                    CarConstants.CAR_HVAC_SYNC_ENABLE.getValue(),
+                                    next,
+                            )
+                        }
+                        ACControlButton(
+                                icon = Icons.Default.AutoMode,
+                                label = "Auto",
+                                isActive = acAuto == "1",
+                                isEnabled = isACEnabled,
+                        ) {
+                            val next = if (acAuto == "1") "0" else "1"
+                            serviceManager.updateData(
+                                    CarConstants.CAR_HVAC_AUTO_ENABLE.getValue(),
+                                    next,
+                            )
+                        }
+                    }
+                }
 
-                                                    // Confirmed upward swipe → show bar
-                                                    if (totalDragY < -30f) {
-                                                        event.changes.forEach { it.consume() }
-                                                        do {
-                                                            val ev2 = awaitPointerEvent()
-                                                            ev2.changes.forEach { it.consume() }
-                                                        } while (ev2.changes.any { it.pressed })
-                                                        BottomBarState.isVisible = true
-                                                        break
-                                                    }
-                                                } while (event.changes.any { it.pressed })
+                Box(modifier = Modifier.weight(0.14f), contentAlignment = Alignment.Center) {
+                    VolumeControlSection(label = "Volume", volume) { delta ->
+                        val newVol = (volume + delta).coerceIn(0, 30)
+                        serviceManager.updateData(
+                                CarConstants.SYS_SETTINGS_AUDIO_MEDIA_VOLUME.getValue(),
+                                newVol.toString(),
+                        )
+                    }
+                }
+
+                Box(modifier = Modifier.weight(0.14f), contentAlignment = Alignment.Center) {
+                    TempControlSection("Passageiro", passTemp, isACEnabled) { delta ->
+                        val newTemp = (passTemp.toFloatOrNull() ?: 22.0f) + delta
+                        serviceManager.updateData(
+                                CarConstants.CAR_HVAC_PASS_TEMPERATURE.getValue(),
+                                String.format(java.util.Locale.US, "%.1f", newTemp),
+                        )
+                    }
+                }
+
+                Box(
+                        modifier =
+                                Modifier.weight(0.05f).pointerInput(Unit) {
+                                    awaitPointerEventScope {
+                                        while (true) {
+                                            awaitFirstDown(requireUnconsumed = false)
+                                            var totalDrag = 0f
+                                            do {
+                                                val event = awaitPointerEvent()
+                                                val change = event.changes.first()
+                                                totalDrag +=
+                                                        (change.position - change.previousPosition)
+                                                                .getDistance()
+                                            } while (event.changes.any { it.pressed })
+                                            if (totalDrag < 30f) {
+                                                BottomBarState.isOverrideMenuExpanded =
+                                                        !BottomBarState.isOverrideMenuExpanded
+                                                if (BottomBarState.isOverrideMenuExpanded) {
+                                                    BottomBarState.isMenuExpanded = false
+                                                    BottomBarState.isSettingsMenuExpanded = false
+                                                }
                                             }
                                         }
                                     }
-            )
+                                },
+                        contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                            Icons.Default.SwapVert,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.8f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Seletor de estilo da barra inferior para a tela de parâmetros.
+ * Mostra sempre os radio buttons (Dock nova / Barra antiga); padrão é a dock nova.
+ */
+@Composable
+fun BottomBarStyleChooser(
+        useLegacy: Boolean,
+        onStyleChange: (Boolean) -> Unit,
+) {
+    Column(modifier = Modifier.padding(top = 8.dp)) {
+        HorizontalDivider(color = Color(0xFF1D2430), thickness = 1.dp)
+        Spacer(modifier = Modifier.height(12.dp))
+        Text("Estilo da barra", color = Color.White, fontSize = 16.sp)
+        Spacer(modifier = Modifier.height(8.dp))
+        BarStyleOption(
+                title = "Dock nova (recomendado)",
+                description = "Painel translúcido moderno com submenus integrados",
+                selected = !useLegacy,
+                onSelect = { onStyleChange(false) },
+        )
+        BarStyleOption(
+                title = "Barra antiga",
+                description = "Barra horizontal clássica na parte inferior",
+                selected = useLegacy,
+                onSelect = { onStyleChange(true) },
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun BarStyleOption(
+        title: String,
+        description: String,
+        selected: Boolean,
+        onSelect: () -> Unit,
+) {
+    Row(
+            modifier =
+                    Modifier.fillMaxWidth()
+                            .clickable { onSelect() }
+                            .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(
+                selected = selected,
+                onClick = onSelect,
+                colors =
+                        RadioButtonDefaults.colors(
+                                selectedColor = AppColors.Primary,
+                                unselectedColor = AppColors.TextSecondary,
+                        ),
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = Color.White, fontSize = 15.sp)
+            Text(description, color = Color.Gray, fontSize = 12.sp)
         }
     }
 }
@@ -543,51 +799,58 @@ fun AppSwitcherSection() {
 }
 
 @Composable
-fun AppMenuContent() {
+fun AppMenuContent(
+        modifier: Modifier = Modifier.fillMaxWidth(0.25f),
+        embedded: Boolean = false
+) {
     val configs = br.com.redesurftank.havalshisuku.managers.DisplayAppLauncher.getAllConfigs()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    Box(
-            modifier =
-                    Modifier.background(
+    val containerModifier =
+            if (embedded) modifier
+            else
+                    modifier
+                            .background(
                                     Color(0xFF13151A).copy(alpha = 0.95f),
                                     RoundedCornerShape(12.dp)
                             )
                             .border(1.dp, Color(0xFF1D2430), RoundedCornerShape(12.dp))
-                            .fillMaxWidth(0.25f)
                             .padding(16.dp)
-    ) {
+
+    Box(modifier = containerModifier) {
         val appList = configs.toList()
         val columns = 3
         val totalApps = appList.size
         val rows = (totalApps + columns - 1) / columns
 
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            // Header with Title and Close Button
-            Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                        text = "Aplicativos",
-                        color = Color.White,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                )
-                IconButton(
-                        onClick = {
-                            br.com.redesurftank.havalshisuku.models.BottomBarState.isMenuExpanded =
-                                    false
-                        },
-                        modifier = Modifier.size(24.dp)
+            // Header with Title and Close Button (oculto quando integrado na dock).
+            if (!embedded) {
+                Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Fechar",
-                            tint = Color.White.copy(alpha = 0.7f)
+                    Text(
+                            text = "Aplicativos",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
                     )
+                    IconButton(
+                            onClick = {
+                                br.com.redesurftank.havalshisuku.models.BottomBarState
+                                        .closeRadialSubMenu()
+                            },
+                            modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Fechar",
+                                tint = Color.White.copy(alpha = 0.7f)
+                        )
+                    }
                 }
             }
 
@@ -613,7 +876,7 @@ fun AppMenuContent() {
                                             scope
                                     ) {
                                         br.com.redesurftank.havalshisuku.models.BottomBarState
-                                                .isMenuExpanded = false
+                                                .closeRadialSubMenu()
                                     }
                                 }
                             } else {
@@ -665,80 +928,78 @@ fun CarSettingsSection() {
 }
 
 @Composable
-fun SettingsMenuContent(drive: String, ev: String, regen: String, steer: String) {
+fun SettingsMenuContent(
+        drive: String,
+        ev: String,
+        regen: String,
+        steer: String,
+        embedded: Boolean = false
+) {
     val serviceManager = br.com.redesurftank.havalshisuku.managers.ServiceManager.getInstance()
-    Box(
-            modifier =
-                    Modifier.background(
-                                    Color(0xFF13151A).copy(alpha = 0.95f),
-                                    RoundedCornerShape(12.dp)
-                            )
-                            .border(1.dp, Color(0xFF1D2430), RoundedCornerShape(12.dp))
-                            .width(480.dp)
-                            .padding(16.dp)
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
-            // Category: Drive Mode
-            SettingsCategoryRow(
-                    "Modo de Condução",
-                    drive,
-                    listOf(
-                            "2" to "Eco",
-                            "0" to "Normal",
-                            "1" to "Sport",
-                            "3" to "Neve",
-                            "4" to "Areia",
-                            "5" to "Lama"
-                    ),
-                    columns = 3
-            ) { newVal ->
-                serviceManager.updateData(
-                        CarConstants.CAR_DRIVE_SETTING_DRIVE_MODE.getValue(),
-                        newVal
-                )
-            }
+    val inner: @Composable ColumnScope.() -> Unit = {
+        // Category: Drive Mode
+        SettingsCategoryRow(
+                "Modo de Condução",
+                drive,
+                listOf(
+                        "2" to "Eco",
+                        "0" to "Normal",
+                        "1" to "Sport",
+                        "3" to "Neve",
+                        "4" to "Areia",
+                        "5" to "Lama"
+                ),
+                columns = 3
+        ) { newVal ->
+            serviceManager.updateData(
+                    CarConstants.CAR_DRIVE_SETTING_DRIVE_MODE.getValue(),
+                    newVal
+            )
+        }
 
-            // Category: EV Mode
-            SettingsCategoryRow(
-                    "Modo EV",
-                    ev,
-                    listOf("0" to "HEV", "1" to "EV Prioritário", "3" to "EV")
-            ) { newVal ->
-                serviceManager.updateData(
-                        CarConstants.CAR_EV_SETTING_POWER_MODEL_CONFIG.getValue(),
-                        newVal
-                )
-            }
+        // Category: EV Mode
+        SettingsCategoryRow(
+                "Modo EV",
+                ev,
+                listOf("0" to "HEV", "1" to "EV Prioritário", "3" to "EV")
+        ) { newVal ->
+            serviceManager.updateData(
+                    CarConstants.CAR_EV_SETTING_POWER_MODEL_CONFIG.getValue(),
+                    newVal
+            )
+        }
 
-            // Category: Regen
-            SettingsCategoryRow(
-                    "Modo de Regeneração",
-                    regen,
-                    listOf("2" to "Baixo", "0" to "Normal", "1" to "Alto")
-            ) { newVal ->
-                serviceManager.updateData(
-                        CarConstants.CAR_EV_SETTING_ENERGY_RECOVERY_LEVEL.getValue(),
-                        newVal
-                )
-            }
+        // Category: Regen
+        SettingsCategoryRow(
+                "Modo de Regeneração",
+                regen,
+                listOf("2" to "Baixo", "0" to "Normal", "1" to "Alto")
+        ) { newVal ->
+            serviceManager.updateData(
+                    CarConstants.CAR_EV_SETTING_ENERGY_RECOVERY_LEVEL.getValue(),
+                    newVal
+            )
+        }
 
-            // Category: Steering
-            SettingsCategoryRow(
-                    "Modo de Direção",
-                    steer,
-                    listOf("2" to "Conforto", "0" to "Normal", "1" to "Esportiva")
-            ) { newVal ->
-                serviceManager.updateData(
-                        CarConstants.CAR_DRIVE_SETTING_STEERING_WHEEL_ASSIST_MODE.getValue(),
-                        newVal
-                )
-            }
+        // Category: Steering
+        SettingsCategoryRow(
+                "Modo de Direção",
+                steer,
+                listOf("2" to "Conforto", "0" to "Normal", "1" to "Esportiva")
+        ) { newVal ->
+            serviceManager.updateData(
+                    CarConstants.CAR_DRIVE_SETTING_STEERING_WHEEL_ASSIST_MODE.getValue(),
+                    newVal
+            )
+        }
 
+        // Seta de fechar só no modo legado (na dock o X cuida disso).
+        if (!embedded) {
             Box(
                     modifier =
                             Modifier.fillMaxWidth().height(24.dp).clickable {
                                 br.com.redesurftank.havalshisuku.models.BottomBarState
-                                        .isSettingsMenuExpanded = false
+                                        .closeRadialSubMenu()
                             },
                     contentAlignment = Alignment.Center
             ) {
@@ -750,6 +1011,25 @@ fun SettingsMenuContent(drive: String, ev: String, regen: String, steer: String)
                 )
             }
         }
+    }
+
+    if (embedded) {
+        Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                content = inner
+        )
+    } else {
+        Box(
+                modifier =
+                        Modifier.background(
+                                        Color(0xFF13151A).copy(alpha = 0.95f),
+                                        RoundedCornerShape(12.dp)
+                                )
+                                .border(1.dp, Color(0xFF1D2430), RoundedCornerShape(12.dp))
+                                .width(480.dp)
+                                .padding(16.dp)
+        ) { Column(verticalArrangement = Arrangement.spacedBy(24.dp), content = inner) }
     }
 }
 
@@ -885,7 +1165,10 @@ fun SettingsCategoryRow(
                                 val (valKey, valLabel) = options[index]
                                 val isSelected = currentValue == valKey
                                 Surface(
-                                        onClick = { onSelect(valKey) },
+                                        onClick = {
+                                            BottomBarState.bumpRadialActivity()
+                                            onSelect(valKey)
+                                        },
                                         modifier = Modifier.weight(1f),
                                         color =
                                                 if (isSelected) Color(0xFF2196F3).copy(alpha = 0.2f)
@@ -928,7 +1211,10 @@ fun SettingsCategoryRow(
                 options.forEach { (valKey, valLabel) ->
                     val isSelected = currentValue == valKey
                     Surface(
-                            onClick = { onSelect(valKey) },
+                            onClick = {
+                                BottomBarState.bumpRadialActivity()
+                                onSelect(valKey)
+                            },
                             modifier = Modifier.weight(1f),
                             color =
                                     if (isSelected) Color(0xFF2196F3).copy(alpha = 0.2f)
@@ -958,59 +1244,6 @@ fun SettingsCategoryRow(
     }
 }
 
-/** Som curto de “passo” (efeito de clique do sistema), sem vibração. */
-@Composable
-private fun rememberBottomBarAdjustSound(): () -> Unit {
-    val view = LocalView.current
-    return remember(view) { { view.playSoundEffect(SoundEffectConstants.CLICK) } }
-}
-
-/**
- * Arrasto horizontal no valor: direita aumenta, esquerda diminui. Mantém os mesmos passos que
- * [onIncrement]/[onDecrement]; emite som por passo.
- */
-@Composable
-private fun Modifier.dragHorizontalValueAdjust(
-        enabled: Boolean,
-        pixelsPerStep: Float,
-        onIncrement: () -> Unit,
-        onDecrement: () -> Unit,
-        onDraggingChange: (Boolean) -> Unit,
-): Modifier {
-    val playSound = rememberBottomBarAdjustSound()
-    val onInc by rememberUpdatedState(onIncrement)
-    val onDec by rememberUpdatedState(onDecrement)
-    val onDrag by rememberUpdatedState(onDraggingChange)
-    val sound by rememberUpdatedState(playSound)
-    return this.then(
-            Modifier.pointerInput(enabled, pixelsPerStep) {
-                if (!enabled) return@pointerInput
-                var pending = 0f
-                detectHorizontalDragGestures(
-                        onDragStart = {
-                            pending = 0f
-                            onDrag(true)
-                        },
-                        onDragEnd = { onDrag(false) },
-                        onDragCancel = { onDrag(false) },
-                        onHorizontalDrag = { _, dragAmount ->
-                            pending += dragAmount
-                            while (pending <= -pixelsPerStep) {
-                                onDec()
-                                sound()
-                                pending += pixelsPerStep
-                            }
-                            while (pending >= pixelsPerStep) {
-                                onInc()
-                                sound()
-                                pending -= pixelsPerStep
-                            }
-                        }
-                )
-            }
-    )
-}
-
 @Composable
 fun TempControlSection(
         label: String,
@@ -1019,9 +1252,6 @@ fun TempControlSection(
         onValueChange: (Float) -> Unit
 ) {
     val alpha = if (isEnabled) 1f else 0.4f
-    val density = LocalDensity.current
-    val pxPerStep = with(density) { 20.dp.toPx() }
-    var valueDragging by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.alpha(alpha)) {
         SmallButton(Icons.Default.Remove, isEnabled) { onValueChange(-0.5f) }
         Column(
@@ -1033,7 +1263,6 @@ fun TempControlSection(
             val isAbnormal = floatTemp >= 85f || floatTemp <= -40f || floatTemp == -1f
             val displayTemp = if (!isEnabled || isAbnormal) "--" else temp
             val tempColor = if (floatTemp > 30f) Color.Red else Color.White
-            val dragEnabled = isEnabled && displayTemp != "--"
             Text(
                     text =
                             buildAnnotatedString {
@@ -1043,21 +1272,7 @@ fun TempControlSection(
                                 if (displayTemp != "--") append("°C")
                             },
                     style = commonTextStyle.copy(fontSize = 18.sp),
-                    modifier =
-                            Modifier.padding(horizontal = 4.dp)
-                                    .alpha(if (valueDragging) 0.88f else 1f)
-                                    .graphicsLayer {
-                                        transformOrigin = TransformOrigin(0.5f, 0.5f)
-                                        scaleX = if (valueDragging) 1.04f else 1f
-                                        scaleY = if (valueDragging) 1.04f else 1f
-                                    }
-                                    .dragHorizontalValueAdjust(
-                                            enabled = dragEnabled,
-                                            pixelsPerStep = pxPerStep,
-                                            onIncrement = { onValueChange(0.5f) },
-                                            onDecrement = { onValueChange(-0.5f) },
-                                            onDraggingChange = { valueDragging = it }
-                                    )
+                    modifier = Modifier.padding(horizontal = 4.dp)
             )
         }
         SmallButton(Icons.Default.Add, isEnabled) { onValueChange(0.5f) }
@@ -1067,9 +1282,6 @@ fun TempControlSection(
 @Composable
 fun FanControlSection(speed: Int, isEnabled: Boolean, onValueChange: (Int) -> Unit) {
     val alpha = if (isEnabled) 1f else 0.4f
-    val density = LocalDensity.current
-    val pxPerStep = with(density) { 20.dp.toPx() }
-    var valueDragging by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.alpha(alpha)) {
         SmallButton(Icons.Default.Remove, isEnabled) { onValueChange(-1) }
         Column(
@@ -1077,25 +1289,7 @@ fun FanControlSection(speed: Int, isEnabled: Boolean, onValueChange: (Int) -> Un
                 modifier = Modifier.width(120.dp)
         ) {
             Text(text = "Ventilação", style = labelStyle.copy(fontSize = 10.sp))
-            Text(
-                    text = speed.toString(),
-                    style = commonTextStyle.copy(fontSize = 18.sp),
-                    modifier =
-                            Modifier.padding(horizontal = 4.dp)
-                                    .alpha(if (valueDragging) 0.88f else 1f)
-                                    .graphicsLayer {
-                                        transformOrigin = TransformOrigin(0.5f, 0.5f)
-                                        scaleX = if (valueDragging) 1.04f else 1f
-                                        scaleY = if (valueDragging) 1.04f else 1f
-                                    }
-                                    .dragHorizontalValueAdjust(
-                                            enabled = isEnabled,
-                                            pixelsPerStep = pxPerStep,
-                                            onIncrement = { onValueChange(1) },
-                                            onDecrement = { onValueChange(-1) },
-                                            onDraggingChange = { valueDragging = it }
-                                    )
-            )
+            Text(text = speed.toString(), style = commonTextStyle.copy(fontSize = 18.sp))
         }
         SmallButton(Icons.Default.Add, isEnabled) { onValueChange(1) }
     }
@@ -1134,9 +1328,6 @@ fun FanSpeedIcon(speed: Int) {
 
 @Composable
 fun VolumeControlSection(label: String, volume: Int, onValueChange: (Int) -> Unit) {
-    val density = LocalDensity.current
-    val pxPerStep = with(density) { 20.dp.toPx() }
-    var valueDragging by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         SmallButton(Icons.Default.Remove) { onValueChange(-1) }
         Column(
@@ -1147,21 +1338,7 @@ fun VolumeControlSection(label: String, volume: Int, onValueChange: (Int) -> Uni
             Text(
                     text = volume.toString(),
                     style = commonTextStyle,
-                    modifier =
-                            Modifier.padding(horizontal = 4.dp)
-                                    .alpha(if (valueDragging) 0.88f else 1f)
-                                    .graphicsLayer {
-                                        transformOrigin = TransformOrigin(0.5f, 0.5f)
-                                        scaleX = if (valueDragging) 1.04f else 1f
-                                        scaleY = if (valueDragging) 1.04f else 1f
-                                    }
-                                    .dragHorizontalValueAdjust(
-                                            enabled = true,
-                                            pixelsPerStep = pxPerStep,
-                                            onIncrement = { onValueChange(1) },
-                                            onDecrement = { onValueChange(-1) },
-                                            onDraggingChange = { valueDragging = it }
-                                    )
+                    modifier = Modifier.padding(horizontal = 4.dp)
             )
         }
         SmallButton(Icons.Default.Add) { onValueChange(1) }
@@ -1336,6 +1513,7 @@ fun AppGridItem(
             modifier =
                     Modifier.fillMaxWidth()
                             .clickable {
+                                BottomBarState.bumpRadialActivity()
                                 onClick()
                                 // Update shared selection state
                                 br.com.redesurftank.havalshisuku.models.BottomBarState
@@ -1388,7 +1566,7 @@ fun AppGridItem(
 }
 
 @Composable
-fun OverrideMenuContent() {
+fun OverrideMenuContent(embedded: Boolean = false) {
     val context = LocalContext.current
     val pkg = BottomBarState.currentPackage
     val prefs = remember {
@@ -1444,8 +1622,9 @@ fun OverrideMenuContent() {
                 .apply()
     }
 
-    Box(
-            modifier =
+    val containerModifier =
+            if (embedded) Modifier.fillMaxWidth()
+            else
                     Modifier.background(
                                     Color(0xFF13151A).copy(alpha = 0.95f),
                                     RoundedCornerShape(12.dp)
@@ -1453,7 +1632,8 @@ fun OverrideMenuContent() {
                             .border(1.dp, Color(0xFF1D2430), RoundedCornerShape(12.dp))
                             .width(360.dp)
                             .padding(16.dp)
-    ) {
+
+    Box(modifier = containerModifier) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text(
                     text = "Ajuste Real-time: $pkg",

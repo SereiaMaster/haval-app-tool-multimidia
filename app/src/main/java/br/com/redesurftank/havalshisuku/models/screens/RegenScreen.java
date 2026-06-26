@@ -85,7 +85,15 @@ public class RegenScreen implements Screen {
     public void initialize() {
         this.serviceManager = ServiceManager.getInstance();
         String regenFromCar = ServiceManager.getInstance().getData(CarConstants.CAR_EV_SETTING_ENERGY_RECOVERY_LEVEL.getValue());
-        this.currentRegenIndex = findIndexFromValue(Integer.parseInt(regenFromCar));
+        int regenValue = 0;
+        if (regenFromCar != null && !regenFromCar.isEmpty()) {
+            try {
+                regenValue = Integer.parseInt(regenFromCar);
+            } catch (NumberFormatException ignored) {
+                regenValue = 0;
+            }
+        }
+        this.currentRegenIndex = findIndexFromValue(regenValue);
         String onePedalFromCar = ServiceManager.getInstance().getData(CarConstants.CAR_CONFIGURE_PEDAL_CONTROL_ENABLE.getValue());
         if (onePedalFromCar != null) this.isOnePedalEnabled = onePedalFromCar.equals("1");
         else this.isOnePedalEnabled = false;

@@ -309,6 +309,11 @@ fun BasicSettingsTab() {
                         )
                 )
         }
+        var localCarMockEnabled by remember {
+                mutableStateOf(
+                        prefs.getBoolean(SharedPreferencesKeys.ENABLE_LOCAL_CAR_MOCK.key, false)
+                )
+        }
         var disableMonitoring by remember {
                 mutableStateOf(
                         prefs.getBoolean(SharedPreferencesKeys.DISABLE_MONITORING.key, false)
@@ -472,6 +477,11 @@ fun BasicSettingsTab() {
                         prefs.getBoolean(SharedPreferencesKeys.BOTTOM_BAR_AUTO_HIDE.key, false)
                 )
         }
+        var useLegacyBottomBar by remember {
+                mutableStateOf(
+                        prefs.getBoolean(SharedPreferencesKeys.BOTTOM_BAR_USE_LEGACY.key, false)
+                )
+        }
         var showStartPicker by remember { mutableStateOf(false) }
         var showEndPicker by remember { mutableStateOf(false) }
         var enableSpeedAdjustment by remember {
@@ -541,6 +551,64 @@ fun BasicSettingsTab() {
                                                 )
                                         }
                                 }
+                        )
+                )
+        }
+
+        if (br.com.redesurftank.havalshisuku.utils.EmulatorUtils.isEmulator() || isAdvancedUse) {
+                settingsList.add(
+                        SettingItem(
+                                title = "Modo mock local (desenvolvimento)",
+                                description = SharedPreferencesKeys.ENABLE_LOCAL_CAR_MOCK.description,
+                                checked = localCarMockEnabled,
+                                onCheckedChange = { checked ->
+                                        localCarMockEnabled = checked
+                                        br.com.redesurftank.havalshisuku.managers.CarMockManager
+                                                .setEnabled(context, checked)
+                                        android.widget.Toast.makeText(
+                                                        context,
+                                                        if (checked) {
+                                                                "Mock ativo — reinicie o app para aplicar. AC/volume simulados na barra radial."
+                                                        } else {
+                                                                "Mock desativado — reinicie o app para voltar ao modo real."
+                                                        },
+                                                        android.widget.Toast.LENGTH_LONG
+                                                )
+                                                .show()
+                                },
+                                customContent =
+                                        if (localCarMockEnabled) {
+                                                {
+                                                        Row(
+                                                                modifier =
+                                                                        Modifier.fillMaxWidth()
+                                                                                .padding(top = 8.dp),
+                                                                horizontalArrangement =
+                                                                        Arrangement.End
+                                                        ) {
+                                                                TextButton(
+                                                                        onClick = {
+                                                                                br.com.redesurftank
+                                                                                        .havalshisuku
+                                                                                        .managers
+                                                                                        .CarMockManager
+                                                                                        .resetToDefaults(
+                                                                                                context
+                                                                                        )
+                                                                                android.widget.Toast
+                                                                                        .makeText(
+                                                                                                context,
+                                                                                                "Valores mock repostos (22°C, volume 12, etc.)",
+                                                                                                android.widget
+                                                                                                        .Toast
+                                                                                                        .LENGTH_SHORT
+                                                                                        )
+                                                                                        .show()
+                                                                        }
+                                                                ) { Text("Repor valores mock") }
+                                                        }
+                                                }
+                                        } else null
                         )
                 )
         }
@@ -1268,19 +1336,22 @@ fun BasicSettingsTab() {
                                         "Cria uma barra inferior fixa com atalhos para ar condicionado e outras funções",
                                 checked = enablePersistentBottomBar,
                                 onCheckedChange = { checked ->
-                                        if (checked && !Settings.canDrawOverlays(context)) {
-                                                // Request overlay permission
-                                                val intent =
-                                                        Intent(
-                                                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                                                Uri.parse(
-                                                                        "package:${context.packageName}"
-                                                                )
-                                                        )
-                                                context.startActivity(intent)
+                                        if (checked &&
+                                                        !br.com.redesurftank.havalshisuku.utils
+                                                                .OverlayPermissionUtils
+                                                                .canDrawOverlays(context)
+                                        ) {
+                                                val opened =
+                                                        br.com.redesurftank.havalshisuku.utils
+                                                                .OverlayPermissionUtils
+                                                                .requestOverlayPermission(context)
                                                 android.widget.Toast.makeText(
                                                                 context,
-                                                                "Por favor, habilite a permissão de sobreposição para a barra inferior",
+                                                                if (opened) {
+                                                                        "Por favor, habilite a permissão de sobreposição para a barra inferior"
+                                                                } else {
+                                                                        "Abra Definições → Apps → Haval Impulse → Aparecer sobre outras apps"
+                                                                },
                                                                 android.widget.Toast.LENGTH_LONG
                                                         )
                                                         .show()
@@ -1303,8 +1374,36 @@ fun BasicSettingsTab() {
                                                                 .java
                                                 )
                                         if (checked) {
-                                                context.startService(serviceIntent)
+                                                try {
+                                                        context.startService(serviceIntent)
+                                                } catch (e: Exception) {
+                                                        android.util.Log.e(
+                                                                "MainActivity",
+                                                                "Failed to start BottomBarService",
+                                                                e
+                                                        )
+                                                        enablePersistentBottomBar = false
+                                                        prefs.edit {
+                                                                putBoolean(
+                                                                        SharedPreferencesKeys
+                                                                                .PERSISTENT_BOTTOM_BAR
+                                                                                .key,
+                                                                        false
+                                                                )
+                                                        }
+                                                        android.widget.Toast.makeText(
+                                                                        context,
+                                                                        "Não foi possível iniciar a barra inferior: ${e.message ?: "erro desconhecido"}",
+                                                                        android.widget.Toast
+                                                                                .LENGTH_LONG
+                                                                )
+                                                                .show()
+                                                        return@SettingItem
+                                                }
                                                 Thread {
+                                                                if (!br.com.redesurftank.havalshisuku.utils.EmulatorUtils
+                                                                                .isEmulator()
+                                                                ) {
                                                                 br.com.redesurftank.havalshisuku
                                                                         .utils.ShizukuUtils
                                                                         .runCommandAndGetOutput(
@@ -1330,6 +1429,7 @@ fun BasicSettingsTab() {
                                                                                         "wm overscan 0,0,0,$overscan"
                                                                                 )
                                                                         )
+                                                                }
                                                         }
                                                         .start()
                                         } else {
@@ -1468,6 +1568,28 @@ fun BasicSettingsTab() {
                                                                                 Modifier.height(
                                                                                         12.dp
                                                                                 )
+                                                                )
+
+                                                                br.com.redesurftank
+                                                                        .havalshisuku.ui.components
+                                                                        .BottomBarStyleChooser(
+                                                                        useLegacy =
+                                                                                useLegacyBottomBar,
+                                                                        onStyleChange = { legacy ->
+                                                                                useLegacyBottomBar =
+                                                                                        legacy
+                                                                                prefs.edit()
+                                                                                        .putBoolean(
+                                                                                                SharedPreferencesKeys
+                                                                                                        .BOTTOM_BAR_USE_LEGACY
+                                                                                                        .key,
+                                                                                                legacy
+                                                                                        )
+                                                                                        .apply()
+                                                                                BottomBarState
+                                                                                        .useLegacyBottomBar =
+                                                                                        legacy
+                                                                        },
                                                                 )
 
                                                         }

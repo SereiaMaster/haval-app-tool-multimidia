@@ -4,6 +4,7 @@ import android.app.Application;
 import android.content.Context;
 import android.content.Intent;
 
+import br.com.redesurftank.havalshisuku.managers.CarMockManager;
 import br.com.redesurftank.havalshisuku.services.ForegroundService;
 
 public class App extends Application {
@@ -30,6 +31,7 @@ public class App extends Application {
     public void onCreate() {
         super.onCreate();
         sApplication = this;
+        CarMockManager.ensureEnabledForEmulator(this);
         var context = getContext();
         Intent serviceIntent = new Intent(context, ForegroundService.class);
         context.startForegroundService(serviceIntent);

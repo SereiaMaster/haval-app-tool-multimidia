@@ -226,7 +226,15 @@ public class MainMenu implements Screen {
             public CycleValues(List<Object> values, CarConstants carOptionID) {
                 this.values = values;
                 String fromCar = ServiceManager.getInstance().getData(carOptionID.getValue());
-                this.currentOptionIndex = this.values.indexOf(Integer.parseInt(fromCar));
+                int parsed = 0;
+                if (fromCar != null && !fromCar.isEmpty()) {
+                    try {
+                        parsed = Integer.parseInt(fromCar);
+                    } catch (NumberFormatException ignored) {
+                        parsed = 0;
+                    }
+                }
+                this.currentOptionIndex = this.values.indexOf(parsed);
                 if (this.currentOptionIndex == -1) this.currentOptionIndex = 0;
                 this.carOptionID = carOptionID;
             }
