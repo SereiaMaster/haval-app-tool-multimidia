@@ -37,11 +37,13 @@ import br.com.redesurftank.havalshisuku.diagnostics.ClusterPersistentEventLogger
 import br.com.redesurftank.havalshisuku.broadcastReceivers.DispatchAllDatasReceiver;
 import br.com.redesurftank.havalshisuku.broadcastReceivers.RestartReceiver;
 import br.com.redesurftank.havalshisuku.managers.AndroidAutoPatchManager;
+import br.com.redesurftank.havalshisuku.managers.CarMockManager;
 import br.com.redesurftank.havalshisuku.managers.CarPlayPatchManager;
 import br.com.redesurftank.havalshisuku.managers.DisplayAppLauncher;
 import br.com.redesurftank.havalshisuku.managers.ServiceManager;
 import br.com.redesurftank.havalshisuku.models.CommandListener;
 import br.com.redesurftank.havalshisuku.models.SharedPreferencesKeys;
+import br.com.redesurftank.havalshisuku.utils.EmulatorUtils;
 import br.com.redesurftank.havalshisuku.utils.IPTablesUtils;
 import br.com.redesurftank.havalshisuku.utils.ShizukuUtils;
 import br.com.redesurftank.havalshisuku.utils.TelnetClientWrapper;
@@ -383,6 +385,11 @@ public class ForegroundService extends Service implements Shizuku.OnBinderDeadLi
             ensurePersistentBottomBarStarted(sharedPreferences, "service-start");
             AmbientLightService.startIfEnabled(this);
 
+            final boolean runningOnEmulator = EmulatorUtils.isEmulator();
+            if (runningOnEmulator) {
+                Log.w(TAG, "Emulator detected — skipping car-specific installation integrity check.");
+            }
+
             // Checar se precisa resetar dados (rollback preview→estável)
             var pendingResetTarget = sharedPreferences.getString(SharedPreferencesKeys.PENDING_RESET_TARGET_VERSION.getKey(), "");
             if (pendingResetTarget != null && !pendingResetTarget.isEmpty()) {
@@ -404,7 +411,7 @@ public class ForegroundService extends Service implements Shizuku.OnBinderDeadLi
                 }
             }
 
-            if (!validateSelfInstallationForAutomaticShizuku(context)) {
+            if (!runningOnEmulator && !validateSelfInstallationForAutomaticShizuku(context)) {
                 synchronized (lifecycleLock) {
                     isShizukuInitialized = false;
                     isServiceRunning = false;
@@ -415,6 +422,18 @@ public class ForegroundService extends Service implements Shizuku.OnBinderDeadLi
             }
 
 
+            if (CarMockManager.isEnabled(context)) {
+                Log.w(TAG, "Local car mock enabled — skipping Shizuku/telnet bootstrap");
+                isShizukuInitialized = true;
+                backgroundHandler.post(() -> {
+                    if (!ServiceManager.getInstance().isServicesInitialized()) {
+                        ServiceManager.getInstance().initializeServices(getApplicationContext());
+                    }
+                });
+                return START_STICKY;
+            }
+
+            if (!runningOnEmulator) {
             backgroundHandler.post(new Runnable() {
                 @Override
                 public void run() {
@@ -476,6 +495,9 @@ public class ForegroundService extends Service implements Shizuku.OnBinderDeadLi
                     }
                 }
             });
+            } else {
+                Log.w(TAG, "Emulator detected — skipping telnet/Shizuku auto-start.");
+            }
         } catch (Exception e) {
             Log.e(TAG, "Error in onStartCommand: " + e.getMessage(), e);
             synchronized (lifecycleLock) {

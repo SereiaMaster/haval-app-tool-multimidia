@@ -7,6 +7,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.setValue
 
+enum class RadialSubMenu {
+    None,
+    Apps,
+    Driving,
+    Advanced
+}
+
 object BottomBarState {
     enum class SliderType {
         DRIVER_TEMP,
@@ -19,8 +26,9 @@ object BottomBarState {
     var sliderPositionX by mutableStateOf(0f)
     var sliderInteractionTrigger by mutableStateOf(0)
     var isSliderDragging by mutableStateOf(false)
-    var isVisible by mutableStateOf(true)
+    var isVisible by mutableStateOf(false)
     var isDashboardExpanded by mutableStateOf(false)
+    var radialSubMenu by mutableStateOf(RadialSubMenu.None)
     var isMenuExpanded by mutableStateOf(false)
     var isSettingsMenuExpanded by mutableStateOf(false)
     var isOverrideMenuExpanded by mutableStateOf(false)
@@ -39,7 +47,33 @@ object BottomBarState {
     var mediaProgressUpdatedAtMs by mutableLongStateOf(0L)
     var mediaCanSeek by mutableStateOf(false)
     var autoHideEnabled by mutableStateOf(false)
+    /** Quando true, renderiza a barra inferior antiga (horizontal) em vez da nova dock. */
+    var useLegacyBottomBar by mutableStateOf(false)
     var isFridaRunning by mutableStateOf(false)
     var isDeleteModeEnabled by mutableStateOf(false)
+    /** Incremented on user interaction; used for idle auto-close. */
+    var radialActivityEpoch by mutableStateOf(0L)
     val restoredApps = mutableStateListOf<String>()
+
+    fun bumpRadialActivity() {
+        radialActivityEpoch = System.currentTimeMillis()
+    }
+
+    fun closeRadialSubMenu() {
+        radialSubMenu = RadialSubMenu.None
+        isMenuExpanded = false
+        isSettingsMenuExpanded = false
+        isOverrideMenuExpanded = false
+    }
+
+    fun hideRadialMenu() {
+        isVisible = false
+        closeRadialSubMenu()
+    }
+
+    fun openRadialMenu() {
+        bumpRadialActivity()
+        isVisible = true
+        closeRadialSubMenu()
+    }
 }

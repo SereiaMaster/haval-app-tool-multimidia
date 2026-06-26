@@ -21,7 +21,8 @@ enum class SteeringWheelCustomActionType(val key: String, val description: Strin
             "Abrir/Fechar Dashboard Impulse."
     ),
     TOGGLE_CAMERA_AVM("toggle_avm", "Alternar o modo de desabilitar a camera com o carro parado."),
-    OPEN_AVM_ONCE("open_avm_once", "Abrir a camera sem interrupções.");
+    OPEN_AVM_ONCE("open_avm_once", "Abrir a camera sem interrupções."),
+    TOGGLE_BOTTOM_BAR("toggle_bottom_bar", "Exibir ou ocultar a barra/dock de rápido acesso.");
 
     companion object {
         fun fromKey(key: String): SteeringWheelCustomActionType? {

@@ -216,6 +216,8 @@ enum class SharedPreferencesKeys(val key: String, val description: String) {
     CUSTOM_THEME_REPO_ENV("customThemeRepoEnv", "Ambiente do Repositório (Prod/Dev)"),
     ACTIVE_CUSTOM_THEME("activeCustomTheme", "Tema Dinâmico Ativo"),
     BOTTOM_BAR_AUTO_HIDE("bottomBarAutoHide", "Esconder barra automaticamente após 30s"),
+    BOTTOM_BAR_ALLOW_STYLE_CHOICE("bottomBarAllowStyleChoice", "Permitir escolher o estilo da barra inferior"),
+    BOTTOM_BAR_USE_LEGACY("bottomBarUseLegacy", "Usar a barra inferior antiga (horizontal) em vez da dock"),
     BOTTOM_BAR_OVERRIDES("bottomBarOverrides", "Overrides de aplicativos salvos (JSON)"),
     DASHBOARD_CARD_ORDER("dashboardCardOrder", "Ordem dos cards do dashboard"),
     ENABLE_SPEED_ADJUSTMENT("enableSpeedAdjustment", "Habilitar ajuste de velocidade no painel"),
@@ -258,5 +260,7 @@ enum class SharedPreferencesKeys(val key: String, val description: String) {
     AMBIENT_LIGHT_AUTO_RECONNECT(
             "ambientLightAutoReconnect",
             "Reconectar automaticamente o Ambient Light"
-    )
+    ),
+    ENABLE_LOCAL_CAR_MOCK("enableLocalCarMock", "Modo mock local — simula telemetria do veículo"),
+    LOCAL_CAR_MOCK_DATA("localCarMockData", "Valores simulados do veículo (JSON)")
 }

@@ -66,6 +66,7 @@ import br.com.redesurftank.havalshisuku.models.SteeringWheelCustomActionType;
 import br.com.redesurftank.havalshisuku.models.screens.Screen;
 import br.com.redesurftank.havalshisuku.services.BottomBarService;
 import br.com.redesurftank.havalshisuku.utils.FridaUtils;
+import br.com.redesurftank.havalshisuku.managers.CarMockManager;
 import br.com.redesurftank.havalshisuku.utils.ShizukuUtils;
 import rikka.shizuku.Shizuku;
 import rikka.shizuku.ShizukuBinderWrapper;
@@ -370,6 +371,14 @@ public class ServiceManager {
         handlerThread = new HandlerThread("ServiceManagerHandlerThread");
         handlerThread.start();
         backgroundHandler = new Handler(handlerThread.getLooper());
+
+        if (CarMockManager.isEnabled(context)) {
+            Log.w(TAG, "Initializing in local car mock mode");
+            CarMockManager.bootstrap(this, context);
+            timeInitialized = SystemClock.uptimeMillis();
+            MainUiManager.getInstance().updateScreen();
+            return true;
+        }
 
         int shizukuRetry = 0;
         while (!Shizuku.pingBinder() && shizukuRetry < 3) {
@@ -827,6 +836,19 @@ public class ServiceManager {
 
     }
 
+    /**
+     * Dispara manualmente a ação configurada para um botão do volante (1 ou 2).
+     * Útil para testar no emulador, onde o evento real do volante (IPC proprietário) não existe.
+     */
+    public void simulateSteeringWheelButton(int button) {
+        String key = (button == 2)
+                ? SharedPreferencesKeys.STEERING_WHEEL_CUSTOM_BUTON_2_ACTION.getKey()
+                : SharedPreferencesKeys.STEERING_WHEEL_CUSTOM_BUTON_1_ACTION.getKey();
+        String action = sharedPreferences.getString(key, SteeringWheelCustomActionType.DEFAULT.name());
+        Log.w(TAG, "Simulating steering wheel button " + button + " -> action: " + action);
+        handleSteeringWheelCustomButton(action, button);
+    }
+
     private void handleSteeringWheelCustomButton(String string, int button) {
         SteeringWheelCustomActionType action = SteeringWheelCustomActionType.Companion.fromKey(string);
         if (action == null || action == SteeringWheelCustomActionType.DEFAULT) {
@@ -947,6 +969,18 @@ public class ServiceManager {
                 } catch (RemoteException e) {
                     Log.w(TAG, "Error to launch AVM camera");
                 }
+                break;
+            case TOGGLE_BOTTOM_BAR:
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                    br.com.redesurftank.havalshisuku.models.BottomBarState barState = br.com.redesurftank.havalshisuku.models.BottomBarState.INSTANCE;
+                    if (barState.isVisible()) {
+                        barState.hideRadialMenu();
+                        Log.w(TAG, "Bottom bar/dock hidden via steering wheel button");
+                    } else {
+                        barState.openRadialMenu();
+                        Log.w(TAG, "Bottom bar/dock shown via steering wheel button");
+                    }
+                });
                 break;
         }
     }
@@ -1361,6 +1395,13 @@ public class ServiceManager {
     }
 
     public String getData(String key) {
+        if (CarMockManager.isEnabled(App.getContext())) {
+            String mockValue = CarMockManager.getValue(key);
+            if (mockValue != null) {
+                dataCache.put(key, mockValue);
+                return mockValue;
+            }
+        }
         if (dataCache.containsKey(key)) {
             return dataCache.get(key);
         }
@@ -1379,6 +1420,13 @@ public class ServiceManager {
     }
 
     public String getUpdatedData(String key) {
+        if (CarMockManager.isEnabled(App.getContext())) {
+            String mockValue = CarMockManager.getValue(key);
+            if (mockValue != null) {
+                dataCache.put(key, mockValue);
+                return mockValue;
+            }
+        }
         if (!isControlServiceAlive()) {
             Log.e(TAG, "ControlService not initialized");
             return null;
@@ -1451,6 +1499,11 @@ public class ServiceManager {
     }
 
     public void updateData(String key, String value) {
+        if (CarMockManager.isEnabled(App.getContext())) {
+            CarMockManager.setValue(key, value, App.getContext());
+            applyMockDataChange(key, value);
+            return;
+        }
         if (!isControlServiceAlive()) {
             Log.e(TAG, "ControlService not initialized");
             return;
@@ -2323,6 +2376,24 @@ public class ServiceManager {
 
     public boolean isServicesInitialized() {
         return servicesInitialized;
+    }
+
+    public void seedMockData(Map<String, String> mockValues) {
+        dataCache.clear();
+        dataCache.putAll(mockValues);
+        servicesInitialized = true;
+        Log.w(TAG, "Mock data seeded (" + mockValues.size() + " keys)");
+    }
+
+    public void applyMockDataChange(String key, String value) {
+        dataCache.put(key, value);
+        for (IDataChanged listener : new ArrayList<>(dataChangedListeners)) {
+            try {
+                listener.onDataChanged(key, value);
+            } catch (Exception e) {
+                Log.e(TAG, "Error notifying mock data listener", e);
+            }
+        }
     }
 
     public void setTimeBootReceived(long l) {

@@ -157,7 +157,7 @@ private val commonTextStyle =
                 letterSpacing = 0.5.sp
         )
 
-private val labelStyle =
+internal val labelStyle =
         TextStyle(
                 color = Color.LightGray,
                 fontSize = 10.sp,
@@ -175,8 +175,421 @@ private fun String?.toComposeColor(): Color {
         }
 }
 
+/**
+ * Ponto de entrada da barra inferior. Decide entre a nova dock translúcida
+ * (padrão) e a barra horizontal antiga (rica em recursos do upstream),
+ * conforme [BottomBarState.useLegacyBottomBar].
+ */
 @Composable
 fun BottomBarContent() {
+        if (BottomBarState.useLegacyBottomBar) {
+                LegacyBottomBarContent()
+        } else {
+                DockBottomBarContent()
+        }
+}
+
+@Composable
+private fun DockBottomBarContent() {
+    val serviceManager = ServiceManager.getInstance()
+    val scope = rememberCoroutineScope()
+
+    var driverTemp by remember {
+        mutableStateOf(
+                serviceManager.getData(CarConstants.CAR_HVAC_DRIVER_TEMPERATURE.getValue()) ?: "--"
+        )
+    }
+    var passTemp by remember {
+        mutableStateOf(
+                serviceManager.getData(CarConstants.CAR_HVAC_PASS_TEMPERATURE.getValue()) ?: "--"
+        )
+    }
+    var volume by remember {
+        mutableIntStateOf(
+                serviceManager
+                        .getData(CarConstants.SYS_SETTINGS_AUDIO_MEDIA_VOLUME.getValue())
+                        ?.toIntOrNull()
+                        ?: 0
+        )
+    }
+    var navVolume by remember {
+        mutableIntStateOf(
+                serviceManager
+                        .getData(CarConstants.SYS_SETTINGS_AUDIO_NAVI_VOLUME.getValue())
+                        ?.toIntOrNull()
+                        ?: 0
+        )
+    }
+    var alertVolume by remember {
+        mutableIntStateOf(
+                serviceManager
+                        .getData(CarConstants.SYS_SETTINGS_AUDIO_RING_VOLUME.getValue())
+                        ?.toIntOrNull()
+                        ?: 0
+        )
+    }
+    var phoneVolume by remember {
+        mutableIntStateOf(
+                serviceManager
+                        .getData(CarConstants.SYS_SETTINGS_AUDIO_PHONE_VOLUME.getValue())
+                        ?.toIntOrNull()
+                        ?: 0
+        )
+    }
+    var voiceVolume by remember {
+        mutableIntStateOf(
+                serviceManager
+                        .getData(CarConstants.SYS_SETTINGS_AUDIO_VOICE_VOLUME.getValue())
+                        ?.toIntOrNull()
+                        ?: 0
+        )
+    }
+    var powerModel by remember {
+        mutableStateOf(
+                serviceManager.getData(CarConstants.CAR_EV_SETTING_POWER_MODEL_CONFIG.getValue())
+                        ?: "0"
+        )
+    }
+    var energyRecovery by remember {
+        mutableStateOf(
+                serviceManager.getData(CarConstants.CAR_EV_SETTING_ENERGY_RECOVERY_LEVEL.getValue())
+                        ?: "0"
+        )
+    }
+    var driveMode by remember {
+        mutableStateOf(
+                serviceManager.getData(CarConstants.CAR_DRIVE_SETTING_DRIVE_MODE.getValue()) ?: "0"
+        )
+    }
+    var steeringMode by remember {
+        mutableStateOf(
+                serviceManager.getData(
+                        CarConstants.CAR_DRIVE_SETTING_STEERING_WHEEL_ASSIST_MODE.getValue()
+                )
+                        ?: "0"
+        )
+    }
+    var fanSpeed by remember {
+        mutableIntStateOf(
+                serviceManager.getData(CarConstants.CAR_HVAC_FAN_SPEED.getValue())?.toIntOrNull()
+                        ?: 1
+        )
+    }
+    var hvacPower by remember {
+        mutableStateOf(serviceManager.getData(CarConstants.CAR_HVAC_POWER_MODE.getValue()) ?: "1")
+    }
+    var acSync by remember {
+        mutableStateOf(serviceManager.getData(CarConstants.CAR_HVAC_SYNC_ENABLE.getValue()) ?: "0")
+    }
+    var acAuto by remember {
+        mutableStateOf(serviceManager.getData(CarConstants.CAR_HVAC_AUTO_ENABLE.getValue()) ?: "0")
+    }
+
+    DisposableEffect(Unit) {
+        val listener =
+                object : br.com.redesurftank.havalshisuku.listeners.IDataChanged {
+                    override fun onDataChanged(key: String, value: String?) {
+                        if (value == null) return
+                        when (key) {
+                            CarConstants.CAR_HVAC_DRIVER_TEMPERATURE.getValue() ->
+                                    driverTemp = value
+                            CarConstants.CAR_HVAC_PASS_TEMPERATURE.getValue() -> passTemp = value
+                            CarConstants.SYS_SETTINGS_AUDIO_MEDIA_VOLUME.getValue() ->
+                                    volume = value.toIntOrNull() ?: volume
+                            CarConstants.SYS_SETTINGS_AUDIO_NAVI_VOLUME.getValue() ->
+                                    navVolume = value.toIntOrNull() ?: navVolume
+                            CarConstants.SYS_SETTINGS_AUDIO_RING_VOLUME.getValue() ->
+                                    alertVolume = value.toIntOrNull() ?: alertVolume
+                            CarConstants.SYS_SETTINGS_AUDIO_PHONE_VOLUME.getValue() ->
+                                    phoneVolume = value.toIntOrNull() ?: phoneVolume
+                            CarConstants.SYS_SETTINGS_AUDIO_VOICE_VOLUME.getValue() ->
+                                    voiceVolume = value.toIntOrNull() ?: voiceVolume
+                            CarConstants.CAR_EV_SETTING_POWER_MODEL_CONFIG.getValue() ->
+                                    powerModel = value
+                            CarConstants.CAR_EV_SETTING_ENERGY_RECOVERY_LEVEL.getValue() ->
+                                    energyRecovery = value
+                            CarConstants.CAR_DRIVE_SETTING_DRIVE_MODE.getValue() ->
+                                    driveMode = value
+                            CarConstants.CAR_DRIVE_SETTING_STEERING_WHEEL_ASSIST_MODE.getValue() ->
+                                    steeringMode = value
+                            CarConstants.CAR_HVAC_FAN_SPEED.getValue() ->
+                                    fanSpeed = value.toIntOrNull() ?: fanSpeed
+                            CarConstants.CAR_HVAC_POWER_MODE.getValue() -> hvacPower = value
+                            CarConstants.CAR_HVAC_SYNC_ENABLE.getValue() -> acSync = value
+                            CarConstants.CAR_HVAC_AUTO_ENABLE.getValue() -> acAuto = value
+                        }
+                    }
+                }
+        serviceManager.addDataChangedListener(listener)
+        onDispose { serviceManager.removeDataChangedListener(listener) }
+    }
+
+    val isACEnabled = hvacPower == "1"
+
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+        // Transição: a dock sobe ao abrir e desce ao fechar.
+        AnimatedVisibility(
+                visible = BottomBarState.isVisible,
+                modifier = Modifier.align(Alignment.BottomCenter),
+                enter =
+                        slideInVertically(animationSpec = tween(280)) { it } +
+                                fadeIn(animationSpec = tween(220)),
+                exit =
+                        slideOutVertically(animationSpec = tween(260)) { it } +
+                                fadeOut(animationSpec = tween(200)),
+        ) {
+            Box(
+                    modifier =
+                            Modifier.fillMaxWidth()
+                                    .wrapContentHeight()
+                                    .align(Alignment.BottomCenter)
+            ) {
+                RadialMenuContent(
+                        scope = scope,
+                        driverTemp = driverTemp,
+                        passTemp = passTemp,
+                        volume = volume,
+                        navVolume = navVolume,
+                        alertVolume = alertVolume,
+                        phoneVolume = phoneVolume,
+                        voiceVolume = voiceVolume,
+                        fanSpeed = fanSpeed,
+                        isACEnabled = isACEnabled,
+                        acSync = acSync,
+                        acAuto = acAuto,
+                        driveMode = driveMode,
+                        powerModel = powerModel,
+                        energyRecovery = energyRecovery,
+                        steeringMode = steeringMode,
+                        onDriverTempChange = { delta ->
+                            val newTemp = (driverTemp.toFloatOrNull() ?: 22.0f) + delta
+                            serviceManager.updateData(
+                                    CarConstants.CAR_HVAC_DRIVER_TEMPERATURE.getValue(),
+                                    String.format(java.util.Locale.US, "%.1f", newTemp)
+                            )
+                        },
+                        onPassTempChange = { delta ->
+                            val newTemp = (passTemp.toFloatOrNull() ?: 22.0f) + delta
+                            serviceManager.updateData(
+                                    CarConstants.CAR_HVAC_PASS_TEMPERATURE.getValue(),
+                                    String.format(java.util.Locale.US, "%.1f", newTemp)
+                            )
+                        },
+                        onFanChange = { delta ->
+                            val calculatedSpeed = (fanSpeed + delta).coerceIn(0, 7)
+                            serviceManager.updateData(
+                                    CarConstants.CAR_HVAC_FAN_SPEED.getValue(),
+                                    calculatedSpeed.toString()
+                            )
+                            if (calculatedSpeed == 0 && hvacPower == "1") {
+                                serviceManager.updateData(
+                                        CarConstants.CAR_HVAC_POWER_MODE.getValue(),
+                                        "0"
+                                )
+                            } else if (calculatedSpeed > 0 && hvacPower == "0") {
+                                serviceManager.updateData(
+                                        CarConstants.CAR_HVAC_POWER_MODE.getValue(),
+                                        "1"
+                                )
+                            }
+                        },
+                        onVolumeChange = { delta ->
+                            val newVol = (volume + delta).coerceIn(0, 30)
+                            serviceManager.updateData(
+                                    CarConstants.SYS_SETTINGS_AUDIO_MEDIA_VOLUME.getValue(),
+                                    newVol.toString()
+                            )
+                        },
+                        onNavVolumeChange = { delta ->
+                            val newVol = (navVolume + delta).coerceIn(0, 30)
+                            serviceManager.updateData(
+                                    CarConstants.SYS_SETTINGS_AUDIO_NAVI_VOLUME.getValue(),
+                                    newVol.toString()
+                            )
+                        },
+                        onAlertVolumeChange = { delta ->
+                            val newVol = (alertVolume + delta).coerceIn(0, 30)
+                            serviceManager.updateData(
+                                    CarConstants.SYS_SETTINGS_AUDIO_RING_VOLUME.getValue(),
+                                    newVol.toString()
+                            )
+                        },
+                        onPhoneVolumeChange = { delta ->
+                            val newVol = (phoneVolume + delta).coerceIn(0, 30)
+                            serviceManager.updateData(
+                                    CarConstants.SYS_SETTINGS_AUDIO_PHONE_VOLUME.getValue(),
+                                    newVol.toString()
+                            )
+                        },
+                        onVoiceVolumeChange = { delta ->
+                            val newVol = (voiceVolume + delta).coerceIn(0, 30)
+                            serviceManager.updateData(
+                                    CarConstants.SYS_SETTINGS_AUDIO_VOICE_VOLUME.getValue(),
+                                    newVol.toString()
+                            )
+                        },
+                        onSyncToggle = {
+                            val next = if (acSync == "1") "0" else "1"
+                            serviceManager.updateData(
+                                    CarConstants.CAR_HVAC_SYNC_ENABLE.getValue(),
+                                    next
+                            )
+                        },
+                        onAutoToggle = {
+                            val next = if (acAuto == "1") "0" else "1"
+                            serviceManager.updateData(
+                                    CarConstants.CAR_HVAC_AUTO_ENABLE.getValue(),
+                                    next
+                            )
+                        }
+                )
+            }
+        }
+        // Alça minimizada (aparece quando a dock está fechada). Toque ou arrasto p/ cima abre.
+        AnimatedVisibility(
+                visible = !BottomBarState.isVisible,
+                modifier = Modifier.align(Alignment.BottomCenter),
+                enter = fadeIn(animationSpec = tween(180)),
+                exit = fadeOut(animationSpec = tween(70)),
+        ) {
+            BoxWithConstraints(
+                    modifier = Modifier.fillMaxWidth().height(60.dp),
+                    contentAlignment = Alignment.BottomStart,
+            ) {
+                val dockWidth = (maxWidth * DOCK_WIDTH_FRACTION).coerceIn(420.dp, 900.dp)
+                val uiScale = (dockWidth / 620.dp).coerceIn(0.9f, 1.2f)
+                val startPad = (10 * uiScale).dp
+                val handleWidth = (120 * uiScale).dp
+                val handleStart =
+                        (startPad + dockWidth / 2 - handleWidth / 2).coerceAtLeast(0.dp)
+
+                Box(
+                        modifier =
+                                Modifier.padding(start = handleStart)
+                                        .width(handleWidth)
+                                        .height(34.dp)
+                                        .pointerInput(Unit) {
+                                            awaitPointerEventScope {
+                                                while (true) {
+                                                    awaitFirstDown(requireUnconsumed = false)
+                                                    var totalDragY = 0f
+                                                    var totalMove = 0f
+                                                    var opened = false
+                                                    do {
+                                                        val event = awaitPointerEvent()
+                                                        val change = event.changes.first()
+                                                        totalDragY +=
+                                                                change.position.y -
+                                                                        change.previousPosition.y
+                                                        totalMove +=
+                                                                (change.position -
+                                                                                change.previousPosition)
+                                                                        .getDistance()
+                                                        if (totalDragY < -24f) {
+                                                            event.changes.forEach { it.consume() }
+                                                            do {
+                                                                val ev2 = awaitPointerEvent()
+                                                                ev2.changes.forEach {
+                                                                    it.consume()
+                                                                }
+                                                            } while (ev2.changes.any { it.pressed })
+                                                            BottomBarState.openRadialMenu()
+                                                            opened = true
+                                                            break
+                                                        }
+                                                    } while (event.changes.any { it.pressed })
+                                                    if (!opened && totalMove <= 24f) {
+                                                        BottomBarState.openRadialMenu()
+                                                    }
+                                                }
+                                            }
+                                        },
+                        contentAlignment = Alignment.BottomCenter,
+                ) {
+                    Box(
+                            modifier =
+                                    Modifier.padding(bottom = 8.dp)
+                                            .fillMaxWidth()
+                                            .height(8.dp)
+                                            .background(
+                                                    Color.White.copy(alpha = 0.75f),
+                                                    RoundedCornerShape(4.dp),
+                                            )
+                                            .border(
+                                                    1.dp,
+                                                    Color.Black.copy(alpha = 0.35f),
+                                                    RoundedCornerShape(4.dp),
+                                            )
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Seletor de estilo da barra inferior para a tela de parâmetros.
+ * Mostra sempre os radio buttons (Dock nova / Barra antiga); padrão é a dock nova.
+ */
+@Composable
+fun BottomBarStyleChooser(
+        useLegacy: Boolean,
+        onStyleChange: (Boolean) -> Unit,
+) {
+    Column(modifier = Modifier.padding(top = 8.dp)) {
+        HorizontalDivider(color = Color(0xFF1D2430), thickness = 1.dp)
+        Spacer(modifier = Modifier.height(12.dp))
+        Text("Estilo da barra", color = Color.White, fontSize = 16.sp)
+        Spacer(modifier = Modifier.height(8.dp))
+        BarStyleOption(
+                title = "Dock nova (recomendado)",
+                description = "Painel translúcido moderno com submenus integrados",
+                selected = !useLegacy,
+                onSelect = { onStyleChange(false) },
+        )
+        BarStyleOption(
+                title = "Barra antiga",
+                description = "Barra horizontal clássica na parte inferior",
+                selected = useLegacy,
+                onSelect = { onStyleChange(true) },
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun BarStyleOption(
+        title: String,
+        description: String,
+        selected: Boolean,
+        onSelect: () -> Unit,
+) {
+    Row(
+            modifier =
+                    Modifier.fillMaxWidth()
+                            .clickable { onSelect() }
+                            .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(
+                selected = selected,
+                onClick = onSelect,
+                colors =
+                        RadioButtonDefaults.colors(
+                                selectedColor = AppColors.Primary,
+                                unselectedColor = AppColors.TextSecondary,
+                        ),
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = Color.White, fontSize = 15.sp)
+            Text(description, color = Color.Gray, fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
+private fun LegacyBottomBarContent() {
         val serviceManager = ServiceManager.getInstance()
         val scope = rememberCoroutineScope()
 
@@ -1084,7 +1497,7 @@ fun AppSwitcherSection() {
 }
 
 @Composable
-fun AppMenuContent() {
+fun AppMenuContent(modifier: Modifier = Modifier, embedded: Boolean = false) {
         val configsList = remember {
                 mutableStateListOf<br.com.redesurftank.havalshisuku.models.DisplayAppConfig>()
                         .apply { addAll(getBottomBarAppConfigs()) }
@@ -1612,7 +2025,13 @@ fun CarSettingsSection() {
 }
 
 @Composable
-fun SettingsMenuContent(drive: String, ev: String, regen: String, steer: String) {
+fun SettingsMenuContent(
+        drive: String,
+        ev: String,
+        regen: String,
+        steer: String,
+        embedded: Boolean = false
+) {
         val serviceManager = br.com.redesurftank.havalshisuku.managers.ServiceManager.getInstance()
         Box(
                 modifier =
@@ -6223,7 +6642,7 @@ fun AppGridItem(
 }
 
 @Composable
-fun OverrideMenuContent() {
+fun OverrideMenuContent(embedded: Boolean = false) {
         val context = LocalContext.current
         val pkg = BottomBarState.currentPackage
         val prefs = remember {

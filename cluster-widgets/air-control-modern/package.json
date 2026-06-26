@@ -1,7 +1,11 @@
 {
-  "name": "haval-basic",
+  "name": "cluster-air-modern",
   "private": true,
-  "version": "0.0.4",
+  "version": "0.1.0",
+  "description": "Base separada do air-control para o teu tema / cockpit. Build gera app_modern.html sem sobrescrever app.html do projeto principal.",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "browserslist": [
     "last 3 versions",
     "not dead",
@@ -12,12 +16,11 @@
     "dev": "parcel index.html",
     "dev-controls": "npm run dev",
     "clear": "rimraf dist .parcel-cache",
-    "build": "bun run clear && parcel build index.html --dist-dir dist --public-url ./ --no-source-maps && node inline.js",
-    "prerelease": "bun run build"
+    "build": "npm run clear && parcel build index.html --dist-dir dist --public-url ./ --no-source-maps && node inline.js",
+    "prerelease": "npm run build"
   },
   "devDependencies": {
     "baseline-browser-mapping": "^2.10.11",
-    "bun": "^1.3.0",
     "parcel": "^2.16.4",
     "rimraf": "^6.1.3"
   },

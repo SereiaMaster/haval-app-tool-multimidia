@@ -6,6 +6,7 @@ import android.content.Intent;
 
 import br.com.redesurftank.havalshisuku.BuildConfig;
 import br.com.redesurftank.havalshisuku.diagnostics.ClusterPersistentEventLogger;
+import br.com.redesurftank.havalshisuku.managers.CarMockManager;
 import br.com.redesurftank.havalshisuku.services.ForegroundService;
 
 public class App extends Application {
@@ -37,6 +38,7 @@ public class App extends Application {
                 "versionCode=" + BuildConfig.VERSION_CODE + " versionName=" + BuildConfig.VERSION_NAME
         );
         br.com.redesurftank.havalshisuku.managers.DisplayAppLauncher.ensureDefaultDesktopShortcuts();
+        CarMockManager.ensureEnabledForEmulator(this);
 
         var context = getContext();
         Intent serviceIntent = new Intent(context, ForegroundService.class);
