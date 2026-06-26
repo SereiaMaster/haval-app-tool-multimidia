@@ -67,11 +67,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import org.lsposed.hiddenapibypass.HiddenApiBypass
 
-class BottomBarService : LifecycleService(), SavedStateRegistryOwner {
-
-    private val savedStateRegistryController = SavedStateRegistryController.create(this)
-    override val savedStateRegistry: SavedStateRegistry
-        get() = savedStateRegistryController.savedStateRegistry
+class BottomBarService : LifecycleService() {
 
     private var mWindowManager: WindowManager? = null
     private var composeView: ComposeView? = null
@@ -239,7 +235,9 @@ class BottomBarService : LifecycleService(), SavedStateRegistryOwner {
         BottomBarState.useLegacyBottomBar =
                 prefs.getBoolean(SharedPreferencesKeys.BOTTOM_BAR_USE_LEGACY.key, false)
 
-        BottomBarState.isVisible = true
+        // A barra legada inicia visível; a nova dock inicia minimizada (apenas a alça),
+        // abrindo quando o utilizador puxa/toca na alça.
+        BottomBarState.isVisible = BottomBarState.useLegacyBottomBar
 
         // Initial check for Frida status
         updateFridaStatus(prefs)
@@ -3434,6 +3432,7 @@ class BottomBarService : LifecycleService(), SavedStateRegistryOwner {
         mWindowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val themedContext = ContextThemeWrapper(this, R.style.Theme_HavalShisuku)
 
+        composeView =
                 ComposeView(themedContext)
                         .apply {
                             setContent { HavalShisukuTheme { BottomBarContent() } }
@@ -3640,9 +3639,10 @@ class BottomBarService : LifecycleService(), SavedStateRegistryOwner {
                                     )
                                 } else {
                                     val windowHeight = (100 * density).toInt()
-                                    val hiddenTriggerHeight = (40 * density).toInt()
-                                    // Apenas a área da "alça" (sob a dock, lado do motorista) é
-                                    // tocável, para não cobrir os ícones centrais do Android Auto.
+                                    // Hitbox grande (≈ tamanho do dedo), bem maior que a alça
+                                    // visível, mas ainda restrita à área sob a dock para não
+                                    // cobrir os ícones centrais do Android Auto.
+                                    val hiddenTriggerHeight = (64 * density).toInt()
                                     val dpWidth = windowWidth / density
                                     val dockWidthDp =
                                             (dpWidth *
@@ -3652,16 +3652,18 @@ class BottomBarService : LifecycleService(), SavedStateRegistryOwner {
                                     val uiScale = (dockWidthDp / 620f).coerceIn(0.9f, 1.2f)
                                     val startPadDp = 10f * uiScale
                                     val handleWidthDp = 120f * uiScale
-                                    val handleStartDp =
-                                            (startPadDp + dockWidthDp / 2f - handleWidthDp / 2f)
+                                    // Folga lateral generosa para a hitbox exceder a alça visível.
+                                    val slackDp = 56f
+                                    val hitWidthDp = handleWidthDp + 2f * slackDp
+                                    val hitStartDp =
+                                            (startPadDp + dockWidthDp / 2f - hitWidthDp / 2f)
                                                     .coerceAtLeast(0f)
-                                    val slackDp = 24f
                                     val left =
-                                            ((handleStartDp - slackDp) * density)
+                                            (hitStartDp * density)
                                                     .toInt()
                                                     .coerceAtLeast(0)
                                     val right =
-                                            ((handleStartDp + handleWidthDp + slackDp) * density)
+                                            ((hitStartDp + hitWidthDp) * density)
                                                     .toInt()
                                                     .coerceAtMost(windowWidth)
                                     region.union(
@@ -3690,14 +3692,26 @@ class BottomBarService : LifecycleService(), SavedStateRegistryOwner {
     }
 
     private fun ComposeView.setupForService() {
-        setViewTreeLifecycleOwner(this@BottomBarService)
+        this.setViewTreeLifecycleOwner(this@BottomBarService)
         val viewModelStore = ViewModelStore()
-        setViewTreeViewModelStoreOwner(
+        this.setViewTreeViewModelStoreOwner(
                 object : ViewModelStoreOwner {
                     override val viewModelStore: ViewModelStore = viewModelStore
                 }
         )
-        setViewTreeSavedStateRegistryOwner(this@BottomBarService)
+        val savedStateRegistryOwner =
+                object : SavedStateRegistryOwner {
+                    private val lifecycleRegistry = this@BottomBarService.lifecycle
+                    private val savedStateRegistryController =
+                            SavedStateRegistryController.create(this)
+                    override val lifecycle = lifecycleRegistry
+                    override val savedStateRegistry =
+                            savedStateRegistryController.savedStateRegistry
+                    init {
+                        savedStateRegistryController.performRestore(null)
+                    }
+                }
+        this.setViewTreeSavedStateRegistryOwner(savedStateRegistryOwner)
     }
 
     override fun onDestroy() {

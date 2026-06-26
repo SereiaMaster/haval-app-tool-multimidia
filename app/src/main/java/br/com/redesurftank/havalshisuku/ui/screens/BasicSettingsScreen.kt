@@ -373,6 +373,11 @@ fun BasicSettingsTab() {
                         prefs.getBoolean(SharedPreferencesKeys.BOTTOM_BAR_AUTO_HIDE.key, false)
                 )
         }
+        var useLegacyBottomBar by remember {
+                mutableStateOf(
+                        prefs.getBoolean(SharedPreferencesKeys.BOTTOM_BAR_USE_LEGACY.key, false)
+                )
+        }
         var showStartPicker by remember { mutableStateOf(false) }
         var showEndPicker by remember { mutableStateOf(false) }
         var enableSpeedAdjustment by remember {
@@ -1379,6 +1384,29 @@ fun BasicSettingsTab() {
                                                                                         12.dp
                                                                                 )
                                                                 )
+
+                                                                br.com.redesurftank.havalshisuku
+                                                                        .ui.components
+                                                                        .BottomBarStyleChooser(
+                                                                                useLegacy =
+                                                                                        useLegacyBottomBar,
+                                                                                onStyleChange = {
+                                                                                        legacy ->
+                                                                                        useLegacyBottomBar =
+                                                                                                legacy
+                                                                                        prefs.edit {
+                                                                                                putBoolean(
+                                                                                                        SharedPreferencesKeys
+                                                                                                                .BOTTOM_BAR_USE_LEGACY
+                                                                                                                .key,
+                                                                                                        legacy
+                                                                                                )
+                                                                                        }
+                                                                                        BottomBarState
+                                                                                                .useLegacyBottomBar =
+                                                                                                legacy
+                                                                                }
+                                                                        )
                                                         }
                                                 }
                                         } else null

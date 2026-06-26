@@ -208,20 +208,16 @@ fun RadialMenuContent(
                     RadialSubMenu.Apps ->
                             Column(verticalArrangement = Arrangement.spacedBy(gap)) {
                                 Box(modifier = Modifier.height(64.dp)) { AppSwitcherSection() }
-                                AppMenuContent(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        embedded = true,
-                                )
+                                DockAppsPanel(modifier = Modifier.fillMaxWidth())
                             }
                     RadialSubMenu.Driving ->
-                            SettingsMenuContent(
+                            DockDrivingPanel(
                                     driveMode,
                                     powerModel,
                                     energyRecovery,
                                     steeringMode,
-                                    embedded = true,
                             )
-                    RadialSubMenu.Advanced -> OverrideMenuContent(embedded = true)
+                    RadialSubMenu.Advanced -> DockAdvancedPanel()
                 }
             }
 

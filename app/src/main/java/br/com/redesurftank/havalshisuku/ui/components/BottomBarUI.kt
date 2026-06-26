@@ -453,21 +453,23 @@ private fun DockBottomBarContent() {
                 exit = fadeOut(animationSpec = tween(70)),
         ) {
             BoxWithConstraints(
-                    modifier = Modifier.fillMaxWidth().height(60.dp),
+                    modifier = Modifier.fillMaxWidth().height(72.dp),
                     contentAlignment = Alignment.BottomStart,
             ) {
                 val dockWidth = (maxWidth * DOCK_WIDTH_FRACTION).coerceIn(420.dp, 900.dp)
                 val uiScale = (dockWidth / 620.dp).coerceIn(0.9f, 1.2f)
                 val startPad = (10 * uiScale).dp
+                // Largura da alça visível (pequena) e da hitbox (bem maior, ~tamanho do dedo).
                 val handleWidth = (120 * uiScale).dp
+                val hitWidth = handleWidth + 96.dp
                 val handleStart =
-                        (startPad + dockWidth / 2 - handleWidth / 2).coerceAtLeast(0.dp)
+                        (startPad + dockWidth / 2 - hitWidth / 2).coerceAtLeast(0.dp)
 
                 Box(
                         modifier =
                                 Modifier.padding(start = handleStart)
-                                        .width(handleWidth)
-                                        .height(34.dp)
+                                        .width(hitWidth)
+                                        .height(64.dp)
                                         .pointerInput(Unit) {
                                             awaitPointerEventScope {
                                                 while (true) {
@@ -509,7 +511,7 @@ private fun DockBottomBarContent() {
                     Box(
                             modifier =
                                     Modifier.padding(bottom = 8.dp)
-                                            .fillMaxWidth()
+                                            .width(handleWidth)
                                             .height(8.dp)
                                             .background(
                                                     Color.White.copy(alpha = 0.75f),
@@ -522,6 +524,310 @@ private fun DockBottomBarContent() {
                                             )
                     )
                 }
+            }
+        }
+    }
+}
+
+/* ----------------------------------------------------------------------------
+ * Painéis compactos ("embedded") usados pelos submenus da dock (RadialMenuContent).
+ * São versões enxutas, sem o contêiner flutuante das versões de tela cheia usadas
+ * pela barra legada (AppMenuContent/SettingsMenuContent/OverrideMenuContent).
+ * -------------------------------------------------------------------------- */
+
+@Composable
+fun DockAppsPanel(modifier: Modifier = Modifier) {
+    val configs = br.com.redesurftank.havalshisuku.managers.DisplayAppLauncher.getAllConfigs()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    Box(modifier = modifier) {
+        val appList = configs.toList()
+        val columns = 3
+        val totalApps = appList.size
+        val rows = (totalApps + columns - 1) / columns
+
+        Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            for (r in (rows - 1) downTo 0) {
+                Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    for (c in 0 until columns) {
+                        val index = r * columns + c
+                        if (index < totalApps) {
+                            val config = appList[index]
+                            Box(
+                                    modifier = Modifier.weight(1f),
+                                    contentAlignment = Alignment.Center
+                            ) {
+                                DockAppGridItem(
+                                        config.packageName,
+                                        config.substituteIcon,
+                                        context,
+                                        scope
+                                ) { BottomBarState.closeRadialSubMenu() }
+                            }
+                        } else {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DockAppGridItem(
+        pkg: String,
+        substituteIcon: String?,
+        context: Context,
+        scope: CoroutineScope,
+        onClick: () -> Unit
+) {
+    val appLabel =
+            remember(pkg) {
+                try {
+                    val info = context.packageManager.getApplicationInfo(pkg, 0)
+                    context.packageManager.getApplicationLabel(info).toString()
+                } catch (e: Exception) {
+                    pkg
+                }
+            }
+    val appIcon =
+            remember(pkg) {
+                try {
+                    context.packageManager.getApplicationIcon(pkg)
+                } catch (e: Exception) {
+                    null
+                }
+            }
+
+    val substituteIconVector = getSubstituteIconVector(substituteIcon)
+
+    val appConfig =
+            remember(pkg) {
+                br.com.redesurftank.havalshisuku.managers.DisplayAppLauncher.getAppConfig(pkg)
+            }
+    val iconTint = appConfig?.iconColor.toComposeColor()
+    val displayName = appConfig?.customName ?: appLabel
+
+    Column(
+            modifier =
+                    Modifier.fillMaxWidth()
+                            .clickable {
+                                BottomBarState.bumpRadialActivity()
+                                onClick()
+                                BottomBarState.selectedPackage = pkg
+                                scope.launch {
+                                    br.com.redesurftank.havalshisuku.managers.DisplayAppLauncher
+                                            .launchAnyApp(context, pkg)
+                                }
+                            }
+                            .padding(4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+                modifier =
+                        Modifier.size(64.dp)
+                                .background(
+                                        Color.White.copy(alpha = 0.1f),
+                                        RoundedCornerShape(12.dp)
+                                ),
+                contentAlignment = Alignment.Center
+        ) {
+            if (substituteIconVector != null) {
+                Icon(
+                        substituteIconVector,
+                        contentDescription = null,
+                        tint = iconTint,
+                        modifier = Modifier.size(40.dp)
+                )
+            } else if (appIcon != null) {
+                AsyncImage(
+                        model = appIcon,
+                        contentDescription = null,
+                        modifier = Modifier.size(48.dp)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+                text = displayName,
+                color = Color.White,
+                fontSize = 11.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                lineHeight = 12.sp,
+                maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+fun DockDrivingPanel(drive: String, ev: String, regen: String, steer: String) {
+    val serviceManager = ServiceManager.getInstance()
+    Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        SettingsCategoryRow(
+                "Modo de Condução",
+                drive,
+                listOf(
+                        "2" to "Eco",
+                        "0" to "Normal",
+                        "1" to "Sport",
+                        "3" to "Neve",
+                        "4" to "Areia",
+                        "5" to "Lama"
+                ),
+                columns = 3
+        ) { newVal ->
+            serviceManager.updateData(CarConstants.CAR_DRIVE_SETTING_DRIVE_MODE.getValue(), newVal)
+        }
+        SettingsCategoryRow(
+                "Modo EV",
+                ev,
+                listOf("0" to "HEV", "1" to "EV Prioritário", "3" to "EV")
+        ) { newVal ->
+            serviceManager.updateData(
+                    CarConstants.CAR_EV_SETTING_POWER_MODEL_CONFIG.getValue(),
+                    newVal
+            )
+        }
+        SettingsCategoryRow(
+                "Modo de Regeneração",
+                regen,
+                listOf("2" to "Baixo", "0" to "Normal", "1" to "Alto")
+        ) { newVal ->
+            serviceManager.updateData(
+                    CarConstants.CAR_EV_SETTING_ENERGY_RECOVERY_LEVEL.getValue(),
+                    newVal
+            )
+        }
+        SettingsCategoryRow(
+                "Modo de Direção",
+                steer,
+                listOf("2" to "Conforto", "0" to "Normal", "1" to "Esportiva")
+        ) { newVal ->
+            serviceManager.updateData(
+                    CarConstants.CAR_DRIVE_SETTING_STEERING_WHEEL_ASSIST_MODE.getValue(),
+                    newVal
+            )
+        }
+    }
+}
+
+@Composable
+fun DockAdvancedPanel() {
+    val context = LocalContext.current
+    val pkg = BottomBarState.currentPackage
+    val prefs = remember {
+        br.com.redesurftank.App.getDeviceProtectedContext()
+                .getSharedPreferences("haval_prefs", Context.MODE_PRIVATE)
+    }
+
+    val overridesJson = prefs.getString(SharedPreferencesKeys.BOTTOM_BAR_OVERRIDES.key, null)
+    val gson = com.google.gson.Gson()
+    val type =
+            object : com.google.gson.reflect.TypeToken<MutableMap<String, Map<String, Int>>>() {}
+                    .type
+    val overrides: MutableMap<String, Map<String, Int>> =
+            if (overridesJson != null) {
+                try {
+                    gson.fromJson(overridesJson, type)
+                } catch (e: Exception) {
+                    mutableMapOf()
+                }
+            } else {
+                mutableMapOf()
+            }
+
+    val currentSettings = overrides[pkg]
+    val overscanValues = listOf(0, 15, 20, 30, 45, 60, 75, 90, 105, 120)
+    val currentOverscan = currentSettings?.get("overscan") ?: 0
+    var overscanIndex by remember(pkg) {
+        mutableIntStateOf(overscanValues.indexOf(currentOverscan).coerceAtLeast(0))
+    }
+    var offset by remember(pkg) { mutableIntStateOf(currentSettings?.get("offset") ?: 0) }
+
+    val updateSettings = { newOverscan: Int, newOffset: Int ->
+        val density = context.resources.displayMetrics.density
+        val overscanPx = (newOverscan * density).toInt()
+
+        br.com.redesurftank.havalshisuku.utils.ShizukuUtils.runCommandAndGetOutput(
+                arrayOf("wm", "overscan", "0,0,0,$overscanPx")
+        )
+        context.sendBroadcast(
+                android.content.Intent("br.com.redesurftank.havalshisuku.UPDATE_BAR_POSITION")
+                        .apply {
+                            putExtra("overscan", newOverscan)
+                            putExtra("offset", newOffset)
+                        }
+        )
+
+        val newOverrides = overrides.toMutableMap()
+        newOverrides[pkg] = mapOf("overscan" to newOverscan, "offset" to newOffset)
+        prefs.edit()
+                .putString(SharedPreferencesKeys.BOTTOM_BAR_OVERRIDES.key, gson.toJson(newOverrides))
+                .apply()
+    }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text(
+                    text = "Ajuste Real-time: $pkg",
+                    style = labelStyle.copy(fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            )
+
+            OverrideControlRow(
+                    "Overscan (Value: ${overscanValues[overscanIndex]})",
+                    overscanIndex,
+                    0..9,
+                    steps = 8
+            ) {
+                overscanIndex = it
+                updateSettings(overscanValues[it], offset)
+            }
+
+            OverrideControlRow("Offset (Move a barra para baixo)", offset, -150..150, steps = 59) {
+                offset = it
+                updateSettings(overscanValues[overscanIndex], it)
+            }
+
+            Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                        onClick = { BottomBarState.closeRadialSubMenu() },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3))
+                ) { Text("Fechar", color = Color.White) }
+
+                Button(
+                        onClick = {
+                            overscanIndex = 0
+                            offset = 0
+                            updateSettings(0, 0)
+
+                            val newOverrides = overrides.toMutableMap()
+                            newOverrides.remove(pkg)
+                            prefs.edit()
+                                    .putString(
+                                            SharedPreferencesKeys.BOTTOM_BAR_OVERRIDES.key,
+                                            gson.toJson(newOverrides)
+                                    )
+                                    .apply()
+
+                            BottomBarState.closeRadialSubMenu()
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
+                ) { Text("Resetar", color = Color.White) }
             }
         }
     }
@@ -1497,7 +1803,7 @@ fun AppSwitcherSection() {
 }
 
 @Composable
-fun AppMenuContent(modifier: Modifier = Modifier, embedded: Boolean = false) {
+fun AppMenuContent() {
         val configsList = remember {
                 mutableStateListOf<br.com.redesurftank.havalshisuku.models.DisplayAppConfig>()
                         .apply { addAll(getBottomBarAppConfigs()) }
@@ -2025,13 +2331,7 @@ fun CarSettingsSection() {
 }
 
 @Composable
-fun SettingsMenuContent(
-        drive: String,
-        ev: String,
-        regen: String,
-        steer: String,
-        embedded: Boolean = false
-) {
+fun SettingsMenuContent(drive: String, ev: String, regen: String, steer: String) {
         val serviceManager = br.com.redesurftank.havalshisuku.managers.ServiceManager.getInstance()
         Box(
                 modifier =
@@ -6642,7 +6942,7 @@ fun AppGridItem(
 }
 
 @Composable
-fun OverrideMenuContent(embedded: Boolean = false) {
+fun OverrideMenuContent() {
         val context = LocalContext.current
         val pkg = BottomBarState.currentPackage
         val prefs = remember {
