@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioManager
 import android.os.SystemClock
 import android.util.Log
+import android.view.SoundEffectConstants
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -17,6 +18,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.*
@@ -326,10 +328,22 @@ private fun DockBottomBarContent() {
 
     val isACEnabled = hvacPower == "1"
 
+    // Qualquer ajuste manual do clima (temperatura, ventilação, sync) com o Auto ligado
+    // deve assumir o controle e desligar o Auto.
+    val disableAutoIfActive: () -> Unit = {
+        if (acAuto == "1") {
+            acAuto = "0"
+            serviceManager.updateData(CarConstants.CAR_HVAC_AUTO_ENABLE.getValue(), "0")
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
         // Transição: a dock sobe ao abrir e desce ao fechar.
+        // Enquanto o Impulse Dashboard (tela cheia) está aberto, escondemos o conteúdo
+        // da dock: a janela overlay fica transparente e com região de toque vazia, deixando
+        // o dashboard (que fica atrás) totalmente visível e tocável.
         AnimatedVisibility(
-                visible = BottomBarState.isVisible,
+                visible = BottomBarState.isVisible && !BottomBarState.isDashboardExpanded,
                 modifier = Modifier.align(Alignment.BottomCenter),
                 enter =
                         slideInVertically(animationSpec = tween(280)) { it } +
@@ -362,20 +376,28 @@ private fun DockBottomBarContent() {
                         energyRecovery = energyRecovery,
                         steeringMode = steeringMode,
                         onDriverTempChange = { delta ->
-                            val newTemp = (driverTemp.toFloatOrNull() ?: 22.0f) + delta
+                            disableAutoIfActive()
+                            val newTemp =
+                                    ((driverTemp.toFloatOrNull() ?: 22.0f) + delta)
+                                            .coerceIn(16.0f, 32.0f)
                             serviceManager.updateData(
                                     CarConstants.CAR_HVAC_DRIVER_TEMPERATURE.getValue(),
                                     String.format(java.util.Locale.US, "%.1f", newTemp)
                             )
                         },
                         onPassTempChange = { delta ->
-                            val newTemp = (passTemp.toFloatOrNull() ?: 22.0f) + delta
+                            disableAutoIfActive()
+                            val newTemp =
+                                    ((passTemp.toFloatOrNull() ?: 22.0f) + delta)
+                                            .coerceIn(16.0f, 32.0f)
                             serviceManager.updateData(
                                     CarConstants.CAR_HVAC_PASS_TEMPERATURE.getValue(),
                                     String.format(java.util.Locale.US, "%.1f", newTemp)
                             )
                         },
                         onFanChange = { delta ->
+                            // Mexer manualmente na ventilação assume o controle: desliga o Auto.
+                            disableAutoIfActive()
                             val calculatedSpeed = (fanSpeed + delta).coerceIn(0, 7)
                             serviceManager.updateData(
                                     CarConstants.CAR_HVAC_FAN_SPEED.getValue(),
@@ -434,6 +456,7 @@ private fun DockBottomBarContent() {
                             )
                         },
                         onSyncToggle = {
+                            disableAutoIfActive()
                             val next = if (acSync == "1") "0" else "1"
                             serviceManager.updateData(
                                     CarConstants.CAR_HVAC_SYNC_ENABLE.getValue(),
@@ -441,7 +464,10 @@ private fun DockBottomBarContent() {
                             )
                         },
                         onAutoToggle = {
+                            // Ativar o Auto entrega o controle total ao carro (desconsidera
+                            // ajustes manuais); só alterna o modo automático.
                             val next = if (acAuto == "1") "0" else "1"
+                            acAuto = next
                             serviceManager.updateData(
                                     CarConstants.CAR_HVAC_AUTO_ENABLE.getValue(),
                                     next
@@ -460,9 +486,12 @@ private fun DockBottomBarContent() {
         // Alça minimizada (aparece quando a dock está fechada). Toque ou arrasto p/ cima abre.
         // Sem animação: some instantaneamente ao abrir; ao fechar só reaparece depois
         // que a animação de descida da dock termina.
-        var showHandle by remember { mutableStateOf(!BottomBarState.isVisible) }
-        LaunchedEffect(BottomBarState.isVisible) {
-            if (BottomBarState.isVisible) {
+        var showHandle by remember {
+            mutableStateOf(!BottomBarState.isVisible && !BottomBarState.isDashboardExpanded)
+        }
+        LaunchedEffect(BottomBarState.isVisible, BottomBarState.isDashboardExpanded) {
+            if (BottomBarState.isVisible || BottomBarState.isDashboardExpanded) {
+                // Dock aberto ou Dashboard em tela cheia: sem alça.
                 showHandle = false
             } else {
                 kotlinx.coroutines.delay(300)
@@ -474,8 +503,8 @@ private fun DockBottomBarContent() {
                     modifier = Modifier.fillMaxWidth().height(72.dp).align(Alignment.BottomCenter),
                     contentAlignment = Alignment.BottomStart,
             ) {
-                val dockWidth = (maxWidth * DOCK_WIDTH_FRACTION).coerceIn(504.dp, 1080.dp)
-                val uiScale = (dockWidth / 620.dp).coerceIn(1.0f, 1.45f)
+                val dockWidth = (maxWidth * DOCK_WIDTH_FRACTION).coerceIn(604.dp, 1296.dp)
+                val uiScale = (dockWidth / 620.dp).coerceIn(1.0f, 1.7f)
                 val startPad = (10 * uiScale).dp
                 // Largura da alça visível (pequena) e da hitbox (bem maior, ~tamanho do dedo).
                 val handleWidth = (120 * uiScale).dp
@@ -794,8 +823,31 @@ fun DockAdvancedPanel() {
                 .apply()
     }
 
+    var dockScalePercent by remember {
+        mutableIntStateOf((BottomBarState.dockUiScale * 100f).roundToInt().coerceIn(70, 180))
+    }
+    val applyDockScale: (Int) -> Unit = { raw ->
+        val clamped = raw.coerceIn(70, 180)
+        dockScalePercent = clamped
+        // Atualização imediata (preview ao vivo) + persistência.
+        BottomBarState.dockUiScale = clamped / 100f
+        prefs.edit().putInt(SharedPreferencesKeys.DOCK_UI_SCALE.key, clamped).apply()
+    }
+
     Box(modifier = Modifier.fillMaxWidth()) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text(
+                    text = "Escala da Dock",
+                    style = labelStyle.copy(fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            )
+            OverrideControlRow(
+                    "Tamanho geral (${dockScalePercent}%)",
+                    dockScalePercent,
+                    70..180,
+                    steps = 21
+            ) { applyDockScale(it) }
+            HorizontalDivider(color = Color(0xFF1D2430), thickness = 1.dp)
+
             Text(
                     text = "Ajuste Real-time: $pkg",
                     style = labelStyle.copy(fontWeight = FontWeight.Bold, fontSize = 12.sp)
@@ -3184,7 +3236,9 @@ private fun ExpandedImpulseDashboard() {
 
         fun collapseDashboard() {
                 BottomBarState.isDashboardExpanded = false
-                BottomBarState.isVisible = true
+                // Barra legada: volta a aparecer. Dock nova: permanece minimizado (só a
+                // alça reaparece), em vez de reabrir o dock inteiro ao fechar o painel.
+                BottomBarState.isVisible = BottomBarState.useLegacyBottomBar
                 BottomBarState.isMenuExpanded = false
                 BottomBarState.isSettingsMenuExpanded = false
                 BottomBarState.isOverrideMenuExpanded = false
@@ -5679,6 +5733,78 @@ private fun DashboardActionButton(
         }
 }
 
+/**
+ * Valor central arrastável do dashboard (mesma lógica da dock): arraste na horizontal
+ * para percorrer os passos e solte para aplicar de uma só vez (1 comando ao carro).
+ * Durante o arrasto só atualiza a pré-visualização local via [onPreviewSteps].
+ */
+@Composable
+private fun DashboardDraggableValue(
+        enabled: Boolean,
+        pxPerStepDp: Dp,
+        onPreviewSteps: (Int) -> Unit,
+        onCommitSteps: (Int) -> Unit,
+        modifier: Modifier = Modifier,
+        content: @Composable () -> Unit,
+) {
+        val view = LocalView.current
+        var dragging by remember { mutableStateOf(false) }
+        val pxPerStep = with(LocalDensity.current) { pxPerStepDp.toPx() }
+        val onPreview by rememberUpdatedState(onPreviewSteps)
+        val onCommit by rememberUpdatedState(onCommitSteps)
+
+        Box(
+                modifier =
+                        modifier.alpha(if (dragging) 0.92f else 1f)
+                                .pointerInput(enabled, pxPerStep) {
+                                        if (!enabled) return@pointerInput
+                                        var pending = 0f
+                                        var netSteps = 0
+                                        detectHorizontalDragGestures(
+                                                onDragStart = {
+                                                        pending = 0f
+                                                        netSteps = 0
+                                                        dragging = true
+                                                        onPreview(0)
+                                                },
+                                                onDragEnd = {
+                                                        dragging = false
+                                                        onCommit(netSteps)
+                                                        netSteps = 0
+                                                },
+                                                onDragCancel = {
+                                                        dragging = false
+                                                        onPreview(0)
+                                                        netSteps = 0
+                                                },
+                                                onHorizontalDrag = { change, dragAmount ->
+                                                        change.consume()
+                                                        pending += dragAmount
+                                                        while (pending <= -pxPerStep) {
+                                                                netSteps -= 1
+                                                                onPreview(netSteps)
+                                                                view.playSoundEffect(
+                                                                        SoundEffectConstants.CLICK
+                                                                )
+                                                                pending += pxPerStep
+                                                        }
+                                                        while (pending >= pxPerStep) {
+                                                                netSteps += 1
+                                                                onPreview(netSteps)
+                                                                view.playSoundEffect(
+                                                                        SoundEffectConstants.CLICK
+                                                                )
+                                                                pending -= pxPerStep
+                                                        }
+                                                },
+                                        )
+                                },
+                contentAlignment = Alignment.Center,
+        ) {
+                content()
+        }
+}
+
 @Composable
 private fun DashboardTempAdjuster(
         label: String,
@@ -5687,33 +5813,70 @@ private fun DashboardTempAdjuster(
         modifier: Modifier = Modifier,
         onDelta: (Float) -> Unit
 ) {
-        Row(
+        val base = temp.toFloatOrNull()
+        val isAbnormal =
+                base != null && (base <= -40f || base >= 85f || base == -1f || base == 255f)
+        val canAdjust = enabled && base != null && !isAbnormal
+        // Passos de pré-visualização durante o arrasto (cada passo = 0.5°). Só aplica ao soltar.
+        // Limites iguais aos do cluster (AcControlScreen): 16°C a 32°C.
+        var previewSteps by remember(temp) { mutableIntStateOf(0) }
+        val previewTemp = ((base ?: 22f) + previewSteps * 0.5f).coerceIn(16f, 32f)
+        val shownText =
+                when {
+                        !canAdjust -> if (enabled) formatTemperature(temp) else "--"
+                        previewSteps != 0 ->
+                                String.format(java.util.Locale.US, "%.1f°C", previewTemp)
+                        else -> formatTemperature(temp)
+                }
+        // A linha inteira é arrastável (arraste e solte para aplicar); os botões +/-
+        // continuam clicáveis pois o arrasto só dispara após o touch slop.
+        DashboardDraggableValue(
+                enabled = canAdjust,
+                pxPerStepDp = 14.dp,
+                onPreviewSteps = { previewSteps = it },
+                onCommitSteps = { steps ->
+                        val target = ((base ?: 22f) + steps * 0.5f).coerceIn(16f, 32f)
+                        val applied = target - (base ?: 22f)
+                        if (applied != 0f) onDelta(applied)
+                        previewSteps = 0
+                },
                 modifier =
                         modifier.alpha(if (enabled) 1f else 0.45f)
                                 .background(Color.White.copy(alpha = 0.055f), RoundedCornerShape(8.dp))
                                 .height(92.dp)
                                 .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-                DashboardIconButton(Icons.Default.Remove, size = 62.dp) { if (enabled) onDelta(-0.5f) }
-                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                                text = label,
-                                color = Color.White.copy(alpha = 0.58f),
-                                fontSize = 12.sp,
-                                fontFamily = DashboardReadableFont,
-                                maxLines = 1
-                        )
-                        Text(
-                                text = if (enabled) formatTemperature(temp) else "--",
-                                color = Color.White,
-                                fontSize = 24.sp,
-                                fontFamily = DashboardReadableFont,
-                                maxLines = 1
-                        )
+                Row(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                        DashboardIconButton(Icons.Default.Remove, size = 62.dp) {
+                                if (enabled) onDelta(-0.5f)
+                        }
+                        Column(
+                                modifier = Modifier.weight(1f),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                                Text(
+                                        text = label,
+                                        color = Color.White.copy(alpha = 0.58f),
+                                        fontSize = 12.sp,
+                                        fontFamily = DashboardReadableFont,
+                                        maxLines = 1
+                                )
+                                Text(
+                                        text = shownText,
+                                        color = Color.White,
+                                        fontSize = 24.sp,
+                                        fontFamily = DashboardReadableFont,
+                                        maxLines = 1
+                                )
+                        }
+                        DashboardIconButton(Icons.Default.Add, size = 62.dp) {
+                                if (enabled) onDelta(0.5f)
+                        }
                 }
-                DashboardIconButton(Icons.Default.Add, size = 62.dp) { if (enabled) onDelta(0.5f) }
         }
 }
 
@@ -5724,33 +5887,60 @@ private fun DashboardFanAdjuster(
         modifier: Modifier = Modifier,
         onDelta: (Int) -> Unit
 ) {
-        Row(
+        val base = speed.toIntOrNull()
+        // Pré-visualização durante o arrasto; só aplica ao soltar. Limites 0..7 (igual à dock).
+        var previewSteps by remember(speed) { mutableIntStateOf(0) }
+        val shownValue =
+                if (base != null) (base + previewSteps).coerceIn(0, 7).toString() else "--"
+        // A linha inteira é arrastável (arraste e solte para aplicar); os botões +/-
+        // continuam clicáveis pois o arrasto só dispara após o touch slop.
+        DashboardDraggableValue(
+                enabled = enabled && base != null,
+                // Faixa curta: arrasto bem menos sensível (igual à ventilação da dock).
+                pxPerStepDp = 34.dp,
+                onPreviewSteps = { previewSteps = it },
+                onCommitSteps = { steps ->
+                        val target = ((base ?: 0) + steps).coerceIn(0, 7)
+                        if (target != (base ?: 0)) onDelta(target - (base ?: 0))
+                        previewSteps = 0
+                },
                 modifier =
                         modifier.alpha(if (enabled) 1f else 0.45f)
                                 .background(Color.White.copy(alpha = 0.055f), RoundedCornerShape(8.dp))
                                 .height(84.dp)
                                 .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-                DashboardIconButton(Icons.Default.Remove, size = 62.dp) { if (enabled) onDelta(-1) }
-                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                                text = "Ventilação",
-                                color = Color.White.copy(alpha = 0.58f),
-                                fontSize = 12.sp,
-                                fontFamily = DashboardReadableFont,
-                                maxLines = 1
-                        )
-                        Text(
-                                text = speed.toIntOrNull()?.toString() ?: "--",
-                                color = Color.White,
-                                fontSize = 24.sp,
-                                fontFamily = DashboardReadableFont,
-                                maxLines = 1
-                        )
+                Row(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                        DashboardIconButton(Icons.Default.Remove, size = 62.dp) {
+                                if (enabled) onDelta(-1)
+                        }
+                        Column(
+                                modifier = Modifier.weight(1f),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                                Text(
+                                        text = "Ventilação",
+                                        color = Color.White.copy(alpha = 0.58f),
+                                        fontSize = 12.sp,
+                                        fontFamily = DashboardReadableFont,
+                                        maxLines = 1
+                                )
+                                Text(
+                                        text = shownValue,
+                                        color = Color.White,
+                                        fontSize = 24.sp,
+                                        fontFamily = DashboardReadableFont,
+                                        maxLines = 1
+                                )
+                        }
+                        DashboardIconButton(Icons.Default.Add, size = 62.dp) {
+                                if (enabled) onDelta(1)
+                        }
                 }
-                DashboardIconButton(Icons.Default.Add, size = 62.dp) { if (enabled) onDelta(1) }
         }
 }
 

@@ -161,7 +161,7 @@ fun InformacoesTab() {
                         try {
                                 val url =
                                         URL(
-                                                "https://api.github.com/repos/bobaoapae/haval-app-tool-multimidia/releases"
+                                                "https://api.github.com/repos/SereiaMaster/haval-app-tool-multimidia/releases"
                                         )
                                 val conn = url.openConnection() as HttpURLConnection
                                 conn.requestMethod = "GET"
@@ -476,6 +476,45 @@ fun InformacoesTab() {
                                                 )
                                                 Spacer(modifier = Modifier.width(8.dp))
                                                 Text("Buscar Atualizações", fontSize = 14.sp)
+                                        }
+                                }
+
+                                // Canal de atualização: marcar para também considerar as
+                                // releases de pré-lançamento (preview/beta) ao buscar.
+                                Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                        Checkbox(
+                                                checked = showBetaUpdates,
+                                                onCheckedChange = {
+                                                        showBetaUpdates = it
+                                                        prefs.edit()
+                                                                .putBoolean(
+                                                                        SharedPreferencesKeys
+                                                                                .SHOW_BETA_UPDATES
+                                                                                .key,
+                                                                        it
+                                                                )
+                                                                .apply()
+                                                },
+                                                colors =
+                                                        CheckboxDefaults.colors(
+                                                                checkedColor = AppColors.Primary
+                                                        )
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Column {
+                                                Text(
+                                                        "Incluir versões beta (preview)",
+                                                        color = Color.White,
+                                                        fontSize = 14.sp
+                                                )
+                                                Text(
+                                                        "Também busca releases marcadas como pré-lançamento",
+                                                        color = Color(0xFFB0B8C4),
+                                                        fontSize = 11.sp
+                                                )
                                         }
                                 }
 

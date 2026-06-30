@@ -262,5 +262,13 @@ enum class SharedPreferencesKeys(val key: String, val description: String) {
             "Reconectar automaticamente o Ambient Light"
     ),
     ENABLE_LOCAL_CAR_MOCK("enableLocalCarMock", "Modo mock local — simula telemetria do veículo"),
-    LOCAL_CAR_MOCK_DATA("localCarMockData", "Valores simulados do veículo (JSON)")
+    LOCAL_CAR_MOCK_DATA("localCarMockData", "Valores simulados do veículo (JSON)"),
+    SUPPRESS_HVAC_NATIVE_PANEL(
+            "suppressHvacNativePanel",
+            "Suprimir o popup nativo de HVAC ao ajustar o clima (força-parar o app de HVAC; pode deixar os ajustes lentos)"
+    ),
+    DOCK_UI_SCALE(
+            "dockUiScalePercent",
+            "Escala da dock (em %); multiplica todo o tamanho e conteúdo da dock"
+    )
 }

@@ -61,14 +61,16 @@ class ImpulseDashboardActivity : ComponentActivity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         BottomBarState.isDashboardExpanded = false
-        BottomBarState.isVisible = true
+        // Barra legada: volta a aparecer. Dock nova: volta ao estado minimizado (só a alça),
+        // em vez de reabrir o dock inteiro.
+        BottomBarState.isVisible = BottomBarState.useLegacyBottomBar
         super.onBackPressed()
     }
 
     override fun onDestroy() {
         if (isFinishing && BottomBarState.isDashboardExpanded) {
             BottomBarState.isDashboardExpanded = false
-            BottomBarState.isVisible = true
+            BottomBarState.isVisible = BottomBarState.useLegacyBottomBar
         }
         super.onDestroy()
     }

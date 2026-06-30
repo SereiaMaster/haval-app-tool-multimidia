@@ -25,8 +25,14 @@ internal object ClusterCardFlowPolicy {
             warningActive: Boolean,
             projectionActive: Boolean
     ): Boolean {
-        // Card 0 is a neutral cluster state; hiding the Presentation drops the active theme.
-        return false
+        // Card 0 = cluster nativo original do carro. Para o usuário poder "passar para o
+        // lado" e ver o cluster de fábrica, escondemos o overlay nesse card (revelando o
+        // nativo por baixo). Mantemos o overlay quando há aviso ativo (precisa ser exibido)
+        // ou quando há projeção AA/CarPlay/espelhamento em andamento (não interromper).
+        if (cardId != ClusterCardIds.NATIVE_CARD) return false
+        if (warningActive) return false
+        if (projectionActive) return false
+        return true
     }
 
     fun decideCardChange(

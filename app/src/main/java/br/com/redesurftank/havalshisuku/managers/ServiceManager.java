@@ -116,6 +116,10 @@ public class ServiceManager {
             CarConstants.SYS_RADIO_PLAY_STATE,
             CarConstants.SYS_RADIO_RDS_CUR_CHANNEL_INFO,
             CarConstants.SYS_SETTINGS_AUDIO_MEDIA_VOLUME,
+            CarConstants.SYS_SETTINGS_AUDIO_NAVI_VOLUME,
+            CarConstants.SYS_SETTINGS_AUDIO_RING_VOLUME,
+            CarConstants.SYS_SETTINGS_AUDIO_PHONE_VOLUME,
+            CarConstants.SYS_SETTINGS_AUDIO_VOICE_VOLUME,
             CarConstants.SYS_SETTINGS_DISPLAY_BACKLIGHT_STATE,
             CarConstants.SYS_SETTINGS_DISPLAY_BRIGHTNESS_LEVEL,
             CarConstants.CAR_DRIVE_SETTING_OUTSIDE_VIEW_MIRROR_FOLD_STATE,
@@ -1509,7 +1513,11 @@ public class ServiceManager {
             return;
         }
 
-        boolean shouldSuspend = hvacKeysToSuspend.contains(key);
+        // A supressão do app nativo de HVAC (pm disable-user + force-stop + sleep) é
+        // pesada e síncrona: deixa os ajustes de clima (inclusive pelo cluster) muito
+        // lentos. Por isso fica desligada por padrão; só roda se o usuário optar.
+        boolean shouldSuspend = hvacKeysToSuspend.contains(key)
+                && sharedPreferences.getBoolean(SharedPreferencesKeys.SUPPRESS_HVAC_NATIVE_PANEL.getKey(), false);
         if (shouldSuspend) {
             ensureHvacSuspended(key);
         }

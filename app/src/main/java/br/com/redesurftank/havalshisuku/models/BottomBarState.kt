@@ -2,6 +2,7 @@ package br.com.redesurftank.havalshisuku.models
 
 import android.graphics.Bitmap
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -49,6 +50,13 @@ object BottomBarState {
     var autoHideEnabled by mutableStateOf(false)
     /** Quando true, renderiza a barra inferior antiga (horizontal) em vez da nova dock. */
     var useLegacyBottomBar by mutableStateOf(false)
+
+    /**
+     * Multiplicador de escala da dock definido pelo utilizador (1.0 = padrão).
+     * Carregado das preferências no arranque do serviço e persistido ao alterar no
+     * painel "Avançado". Multiplica todo o tamanho/conteúdo da dock.
+     */
+    var dockUiScale by mutableFloatStateOf(1.0f)
     var isFridaRunning by mutableStateOf(false)
     var isDeleteModeEnabled by mutableStateOf(false)
     /** Incremented on user interaction; used for idle auto-close. */

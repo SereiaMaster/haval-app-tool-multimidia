@@ -234,6 +234,9 @@ class BottomBarService : LifecycleService() {
                 prefs.getBoolean(SharedPreferencesKeys.BOTTOM_BAR_AUTO_HIDE.key, false)
         BottomBarState.useLegacyBottomBar =
                 prefs.getBoolean(SharedPreferencesKeys.BOTTOM_BAR_USE_LEGACY.key, false)
+        BottomBarState.dockUiScale =
+                (prefs.getInt(SharedPreferencesKeys.DOCK_UI_SCALE.key, 100) / 100f)
+                        .coerceIn(0.7f, 1.8f)
 
         // A barra legada inicia visível; a nova dock inicia minimizada (apenas a alça),
         // abrindo quando o utilizador puxa/toca na alça.
@@ -699,13 +702,19 @@ class BottomBarService : LifecycleService() {
                             if (currentPackage != null && currentPackage != lastPackage) {
                                 lastPackage = currentPackage
 
-                                // Default overscan is back to REFERENCE_OVERSCAN (60)
+                                // A barra legada reserva espaço no fundo (overscan). A dock nova
+                                // é flutuante/translúcida e não deve reservar nada por padrão —
+                                // senão surge uma faixa no fundo da tela ao abri-la. Overrides
+                                // por app (painel Avançado) continuam valendo nos dois modos.
                                 val storedDefault =
-                                        prefs.getInt(
-                                                SharedPreferencesKeys.PERSISTENT_BOTTOM_BAR_OVERSCAN
-                                                        .key,
-                                                REFERENCE_OVERSCAN
-                                        )
+                                        if (BottomBarState.useLegacyBottomBar)
+                                                prefs.getInt(
+                                                        SharedPreferencesKeys
+                                                                .PERSISTENT_BOTTOM_BAR_OVERSCAN
+                                                                .key,
+                                                        REFERENCE_OVERSCAN
+                                                )
+                                        else 0
 
                                 // Also update autoHideEnabled from prefs
                                 withContext(Dispatchers.Main) {
@@ -3332,12 +3341,14 @@ class BottomBarService : LifecycleService() {
                                                             Context.MODE_PRIVATE
                                                     )
                                     val storedDefault =
-                                            prefs.getInt(
-                                                    SharedPreferencesKeys
-                                                            .PERSISTENT_BOTTOM_BAR_OVERSCAN
-                                                            .key,
-                                                    REFERENCE_OVERSCAN
-                                            )
+                                            if (BottomBarState.useLegacyBottomBar)
+                                                    prefs.getInt(
+                                                            SharedPreferencesKeys
+                                                                    .PERSISTENT_BOTTOM_BAR_OVERSCAN
+                                                                    .key,
+                                                            REFERENCE_OVERSCAN
+                                                    )
+                                            else 0
                                     BarSettings(overscan = storedDefault, yOffset = 0)
                                 }
 
@@ -3355,7 +3366,10 @@ class BottomBarService : LifecycleService() {
                 overscanCmd = arrayOf("wm", "overscan", "0,0,0,$overscanValuePx")
             } else {
                 withContext(Dispatchers.Main) {
-                    BottomBarState.isDashboardExpanded = false
+                    // NÃO resetar isDashboardExpanded aqui: o dock pode ser minimizado
+                    // (isVisible=false) justamente para abrir o Dashboard em tela cheia.
+                    // O ciclo de vida da ImpulseDashboardActivity (onBackPressed/onDestroy)
+                    // e os toggles é que controlam essa flag.
                     BottomBarState.isMenuExpanded = false
                     BottomBarState.isSettingsMenuExpanded = false
                     BottomBarState.isOverrideMenuExpanded = false
@@ -3619,7 +3633,8 @@ class BottomBarService : LifecycleService() {
                                 )
                             } else {
                                 val screenHeight = displayMetrics.heightPixels
-                                val radialMenuHeight = (528 * density).toInt()
+                                val dockScale = BottomBarState.dockUiScale
+                                val radialMenuHeight = (634 * density * dockScale).toInt()
 
                                 if (BottomBarState.isVisible) {
                                     val subExpanded =
@@ -3627,7 +3642,7 @@ class BottomBarService : LifecycleService() {
                                                     br.com.redesurftank.havalshisuku.models.RadialSubMenu.None
                                     val touchHeight =
                                             if (BottomBarState.useLegacyBottomBar) (70 * density).toInt()
-                                            else if (subExpanded) (700 * density).toInt()
+                                            else if (subExpanded) (840 * density * dockScale).toInt()
                                             else radialMenuHeight
                                     region.union(
                                             Rect(
@@ -3648,8 +3663,8 @@ class BottomBarService : LifecycleService() {
                                             (dpWidth *
                                                             br.com.redesurftank.havalshisuku.ui.components
                                                                     .DOCK_WIDTH_FRACTION)
-                                                    .coerceIn(504f, 1080f)
-                                    val uiScale = (dockWidthDp / 620f).coerceIn(0.9f, 1.2f)
+                                                    .coerceIn(604f, 1296f)
+                                    val uiScale = (dockWidthDp / 620f).coerceIn(1.0f, 1.7f)
                                     val startPadDp = 10f * uiScale
                                     val handleWidthDp = 120f * uiScale
                                     // Folga lateral generosa para a hitbox exceder a alça visível.
