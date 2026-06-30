@@ -101,6 +101,22 @@ fun BasicSettingsTab() {
                         )
                 )
         }
+        var disableBluetoothOnFoldMirror by remember {
+                mutableStateOf(
+                        prefs.getBoolean(
+                                SharedPreferencesKeys.DISABLE_BLUETOOTH_ON_FOLD_MIRROR.key,
+                                false
+                        )
+                )
+        }
+        var disableHotspotOnFoldMirror by remember {
+                mutableStateOf(
+                        prefs.getBoolean(
+                                SharedPreferencesKeys.DISABLE_HOTSPOT_ON_FOLD_MIRROR.key,
+                                false
+                        )
+                )
+        }
         var closeSunroofSunShadeOnCloseSunroof by remember {
                 mutableStateOf(
                         prefs.getBoolean(
@@ -424,8 +440,59 @@ fun BasicSettingsTab() {
                         prefs.getFloat(SharedPreferencesKeys.OPEN_SUNROOF_CURTAIN_MAX_TEMP.key, -1f)
                 )
         }
+        var enablePersistHevSoc by remember {
+                mutableStateOf(
+                        prefs.getBoolean(SharedPreferencesKeys.ENABLE_PERSIST_HEV_SOC_TARGET.key, false)
+                )
+        }
+        var hevSocTarget by remember {
+                mutableIntStateOf(
+                        prefs.getInt(SharedPreferencesKeys.HEV_SOC_TARGET_VALUE.key, 50)
+                )
+        }
 
         val settingsList = mutableListOf<SettingItem>()
+
+        settingsList.add(
+                SettingItem(
+                        title = "Manter % de bateria no HEV Prioritário",
+                        description = "Se o carro alterar sozinho o % a salvar, o app reaplica o valor que você escolheu. Só vale em HEV Prioritário.",
+                        checked = enablePersistHevSoc,
+                        onCheckedChange = {
+                                enablePersistHevSoc = it
+                                prefs.edit {
+                                        putBoolean(SharedPreferencesKeys.ENABLE_PERSIST_HEV_SOC_TARGET.key, it)
+                                }
+                                if (it) ServiceManager.getInstance().applyHevSocTargetIfActive("UI_TOGGLE")
+                        },
+                        customContent = {
+                                Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                                        Text(
+                                                "Salvar bateria em: $hevSocTarget%",
+                                                color = AppColors.TextPrimary,
+                                                fontSize = 14.sp
+                                        )
+                                        Slider(
+                                                value = hevSocTarget.toFloat(),
+                                                onValueChange = { hevSocTarget = it.toInt() },
+                                                onValueChangeFinished = {
+                                                        prefs.edit {
+                                                                putInt(SharedPreferencesKeys.HEV_SOC_TARGET_VALUE.key, hevSocTarget)
+                                                        }
+                                                        ServiceManager.getInstance().applyHevSocTargetIfActive("UI_SLIDER")
+                                                },
+                                                valueRange = 20f..80f,
+                                                steps = 11,
+                                                colors = SliderDefaults.colors(
+                                                        thumbColor = AppColors.Primary,
+                                                        activeTrackColor = AppColors.Primary,
+                                                        inactiveTrackColor = Color(0xFF2C3139)
+                                                )
+                                        )
+                                }
+                        }
+                )
+        )
 
         if (isAdvancedUse && !selfInstallationCheck) {
                 settingsList.add(
@@ -1480,6 +1547,60 @@ fun BasicSettingsTab() {
                                 }
                         ),
                         SettingItem(
+                                title = "Desligar ponto de acesso ao desligar",
+                                description =
+                                        SharedPreferencesKeys.DISABLE_HOTSPOT_ON_POWER_OFF
+                                                .description,
+                                checked = disableHotspotOnPowerOff,
+                                onCheckedChange = {
+                                        disableHotspotOnPowerOff = it
+                                        prefs.edit {
+                                                putBoolean(
+                                                        SharedPreferencesKeys
+                                                                .DISABLE_HOTSPOT_ON_POWER_OFF
+                                                                .key,
+                                                        it
+                                                )
+                                        }
+                                }
+                        ),
+                        SettingItem(
+                                title = "Desativar Bluetooth ao recolher retrovisores",
+                                description =
+                                        SharedPreferencesKeys.DISABLE_BLUETOOTH_ON_FOLD_MIRROR
+                                                .description,
+                                checked = disableBluetoothOnFoldMirror,
+                                onCheckedChange = {
+                                        disableBluetoothOnFoldMirror = it
+                                        prefs.edit {
+                                                putBoolean(
+                                                        SharedPreferencesKeys
+                                                                .DISABLE_BLUETOOTH_ON_FOLD_MIRROR
+                                                                .key,
+                                                        it
+                                                )
+                                        }
+                                }
+                        ),
+                        SettingItem(
+                                title = "Desativar ponto de acesso ao recolher retrovisores",
+                                description =
+                                        SharedPreferencesKeys.DISABLE_HOTSPOT_ON_FOLD_MIRROR
+                                                .description,
+                                checked = disableHotspotOnFoldMirror,
+                                onCheckedChange = {
+                                        disableHotspotOnFoldMirror = it
+                                        prefs.edit {
+                                                putBoolean(
+                                                        SharedPreferencesKeys
+                                                                .DISABLE_HOTSPOT_ON_FOLD_MIRROR
+                                                                .key,
+                                                        it
+                                                )
+                                        }
+                                }
+                        ),
+                        SettingItem(
                                 title = "Ativar Ambient Light BLE",
                                 description =
                                         "Exibe o recurso opcional para LEDs externos instalados pelo usuario",
@@ -1498,24 +1619,6 @@ fun BasicSettingsTab() {
                                                 AmbientLightService.startIfEnabled(context)
                                         } else {
                                                 AmbientLightService.stop(context)
-                                        }
-                                }
-                        ),
-                        SettingItem(
-                                title = "Desligar ponto de acesso ao desligar",
-                                description =
-                                        SharedPreferencesKeys.DISABLE_HOTSPOT_ON_POWER_OFF
-                                                .description,
-                                checked = disableHotspotOnPowerOff,
-                                onCheckedChange = {
-                                        disableHotspotOnPowerOff = it
-                                        prefs.edit {
-                                                putBoolean(
-                                                        SharedPreferencesKeys
-                                                                .DISABLE_HOTSPOT_ON_POWER_OFF
-                                                                .key,
-                                                        it
-                                                )
                                         }
                                 }
                         ),

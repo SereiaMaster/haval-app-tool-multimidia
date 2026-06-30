@@ -102,6 +102,18 @@ enum class SharedPreferencesKeys(val key: String, val description: String) {
             "bluetoothStateOnPowerOff",
             "Estado do Bluetooth ao desligar o veículo"
     ),
+    HOTSPOT_STATE_ON_POWER_OFF(
+            "hotspotStateOnPowerOff",
+            "Estado do ponto de acesso ao desligar o veículo"
+    ),
+    DISABLE_BLUETOOTH_ON_FOLD_MIRROR(
+            "disableBluetoothOnFoldMirror",
+            "Desativar Bluetooth ao recolher retrovisores"
+    ),
+    DISABLE_HOTSPOT_ON_FOLD_MIRROR(
+            "disableHotspotOnFoldMirror",
+            "Desativar ponto de acesso ao recolher retrovisores"
+    ),
     ENABLE_SEAT_VENTILATION_ON_AC_ON(
             "enableSeatVentilationOnAcOn",
             "Habilitar ventilação do banco do motorista ao ligar o ar-condicionado"
@@ -270,5 +282,7 @@ enum class SharedPreferencesKeys(val key: String, val description: String) {
     DOCK_UI_SCALE(
             "dockUiScalePercent",
             "Escala da dock (em %); multiplica todo o tamanho e conteúdo da dock"
-    )
+    ),
+    ENABLE_PERSIST_HEV_SOC_TARGET("enablePersistHevSocTarget", "Manter o % de bateria escolhido no HEV Prioritário"),
+    HEV_SOC_TARGET_VALUE("hevSocTargetValue", "% de bateria a manter no HEV Prioritário (20-80)")
 }

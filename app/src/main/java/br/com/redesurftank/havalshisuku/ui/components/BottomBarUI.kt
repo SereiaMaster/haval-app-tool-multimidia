@@ -2662,6 +2662,8 @@ private data class DashboardVehicleSnapshot(
         val gear: String,
         val driveMode: String,
         val powerModel: String,
+        val powerReserve: String,
+        val socTarget: String,
         val energyRecovery: String,
         val steeringMode: String,
         val driverTemp: String,
@@ -2717,6 +2719,22 @@ private fun rememberDashboardVehicleSnapshot(
                                 CarConstants.CAR_EV_SETTING_POWER_MODEL_CONFIG.getValue()
                         )
                                 ?: "0"
+                )
+        }
+        var powerReserve by remember {
+                mutableStateOf(
+                        serviceManager.getData(
+                                CarConstants.CAR_EV_SETTING_POWER_RESERVE_CONFIG.getValue()
+                        )
+                                ?: "1"
+                )
+        }
+        var socTarget by remember {
+                mutableStateOf(
+                        serviceManager.getData(
+                                CarConstants.CAR_EV_SETTING_CHARGE_SOC_TARGET_CONFIG.getValue()
+                        )
+                                ?: "50"
                 )
         }
         var energyRecovery by remember {
@@ -2914,6 +2932,10 @@ private fun rememberDashboardVehicleSnapshot(
                                                         .getValue() -> driveMode = value
                                                 CarConstants.CAR_EV_SETTING_POWER_MODEL_CONFIG
                                                         .getValue() -> powerModel = value
+                                                CarConstants.CAR_EV_SETTING_POWER_RESERVE_CONFIG
+                                                        .getValue() -> powerReserve = value
+                                                CarConstants.CAR_EV_SETTING_CHARGE_SOC_TARGET_CONFIG
+                                                        .getValue() -> socTarget = value
                                                 CarConstants.CAR_EV_SETTING_ENERGY_RECOVERY_LEVEL
                                                         .getValue() -> energyRecovery = value
                                                 CarConstants
@@ -3010,6 +3032,8 @@ private fun rememberDashboardVehicleSnapshot(
                 gear = gear,
                 driveMode = driveMode,
                 powerModel = powerModel,
+                powerReserve = powerReserve,
+                socTarget = socTarget,
                 energyRecovery = energyRecovery,
                 steeringMode = steeringMode,
                 driverTemp = driverTemp,
@@ -3861,7 +3885,7 @@ private fun DashboardDrivePanel(snapshot: DashboardVehicleSnapshot, modifier: Mo
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 DashboardStatPill(
                                         label = "EV",
-                                        value = powerModelLabel(snapshot.powerModel),
+                                        value = powerModelLabel(snapshot.powerModel, snapshot.powerReserve, snapshot.socTarget),
                                         icon = Icons.Default.ElectricBolt,
                                         accent = Color(0xFF78E08F),
                                         modifier = Modifier.weight(1f)
@@ -3959,6 +3983,14 @@ private fun DashboardSettingsPanel(
                 val powerOptions = listOf("0" to "HEV", "1" to "EV Prior.", "3" to "EV")
                 val regenOptions = listOf("2" to "Baixo", "0" to "Normal", "1" to "Alto")
                 val steeringOptions = listOf("2" to "Conforto", "0" to "Normal", "1" to "Sport")
+                var showHevDialog by remember { mutableStateOf(false) }
+                if (showHevDialog) {
+                        HevModeDialog(
+                                snapshot = snapshot,
+                                serviceManager = serviceManager,
+                                onDismiss = { showHevDialog = false }
+                        )
+                }
 
                 Column(
                         modifier = Modifier.fillMaxSize(),
@@ -4037,7 +4069,7 @@ private fun DashboardSettingsPanel(
                                         }
                                         DashboardPremiumCycleControl(
                                                 label = "Energia",
-                                                value = powerModelLabel(snapshot.powerModel),
+                                                value = powerModelLabel(snapshot.powerModel, snapshot.powerReserve, snapshot.socTarget),
                                                 nextValue =
                                                         nextDashboardOptionLabel(
                                                                 snapshot.powerModel,
@@ -4045,7 +4077,14 @@ private fun DashboardSettingsPanel(
                                                         ),
                                                 icon = Icons.Default.ElectricBolt,
                                                 accent = Color(0xFF78E08F),
-                                                modifier = Modifier.weight(1f)
+                                                modifier = Modifier.weight(1f),
+                                                onLongClick = {
+                                                        // Toque longo em HEV -> popup do sub-modo
+                                                        // (Inteligente/Prioritário + % de bateria).
+                                                        if (snapshot.powerModel.trim() == "0") {
+                                                                showHevDialog = true
+                                                        }
+                                                }
                                         ) {
                                                 serviceManager.updateData(
                                                         CarConstants
@@ -5517,6 +5556,73 @@ private fun DashboardQuickCycleControl(
 }
 
 @Composable
+private fun HevModeDialog(
+        snapshot: DashboardVehicleSnapshot,
+        serviceManager: ServiceManager,
+        onDismiss: () -> Unit
+) {
+        val reserve = snapshot.powerReserve
+        val pct = snapshot.socTarget.trim().toIntOrNull()?.coerceIn(20, 80) ?: 50
+        var dragging by remember { mutableStateOf(false) }
+        var sliderPos by remember { mutableFloatStateOf(pct.toFloat()) }
+        LaunchedEffect(pct) { if (!dragging) sliderPos = pct.toFloat() }
+        AlertDialog(
+                onDismissRequest = onDismiss,
+                containerColor = Color(0xFF161B24),
+                titleContentColor = Color.White,
+                textContentColor = Color.White,
+                confirmButton = {
+                        TextButton(onClick = onDismiss) {
+                                Text("Fechar", color = Color(0xFF78E08F))
+                        }
+                },
+                title = { Text("Modo HEV") },
+                text = {
+                        Column {
+                                SettingsCategoryRow(
+                                        "Reserva de bateria",
+                                        reserve,
+                                        listOf("1" to "Inteligente", "2" to "Prioritário")
+                                ) { newVal ->
+                                        serviceManager.updateData(
+                                                CarConstants.CAR_EV_SETTING_POWER_RESERVE_CONFIG
+                                                        .getValue(),
+                                                newVal
+                                        )
+                                }
+                                if (reserve.trim() == "2") {
+                                        Spacer(Modifier.height(14.dp))
+                                        Text(
+                                                text = "Bateria a manter: ${sliderPos.toInt()}%",
+                                                style =
+                                                        labelStyle.copy(
+                                                                fontWeight = FontWeight.Bold
+                                                        )
+                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                        Slider(
+                                                value = sliderPos,
+                                                onValueChange = { v ->
+                                                        dragging = true
+                                                        sliderPos = v
+                                                },
+                                                onValueChangeFinished = {
+                                                        dragging = false
+                                                        serviceManager.setHevSocTargetValue(
+                                                                sliderPos.toInt()
+                                                        )
+                                                },
+                                                valueRange = 20f..80f,
+                                                steps = 11
+                                        )
+                                }
+                        }
+                }
+        )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
 private fun DashboardPremiumCycleControl(
         label: String,
         value: String,
@@ -5524,11 +5630,16 @@ private fun DashboardPremiumCycleControl(
         icon: ImageVector,
         accent: Color,
         modifier: Modifier = Modifier,
+        onLongClick: (() -> Unit)? = null,
         onClick: () -> Unit
 ) {
         Surface(
-                onClick = onClick,
-                modifier = modifier.fillMaxHeight(),
+                modifier =
+                        modifier.fillMaxHeight()
+                                .combinedClickable(
+                                        onClick = onClick,
+                                        onLongClick = onLongClick
+                                ),
                 color = Color.White.copy(alpha = 0.052f),
                 shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, accent.copy(alpha = 0.24f))
@@ -6269,11 +6380,23 @@ private fun driveModeLabel(value: String): String {
         }
 }
 
-private fun powerModelLabel(value: String): String {
+private fun powerModelLabel(
+        value: String,
+        reserve: String = "1",
+        socTarget: String = "50"
+): String {
         return when (value) {
                 "1" -> "EV Prior."
                 "3" -> "EV"
-                else -> "HEV"
+                else -> {
+                        // HEV: mostra o sub-modo; se Prioritário, anexa o % de bateria alvo.
+                        if (reserve.trim() == "2") {
+                                val pct = socTarget.trim().toIntOrNull()?.coerceIn(20, 80) ?: 50
+                                "HEV Prior. $pct%"
+                        } else {
+                                "HEV Intel."
+                        }
+                }
         }
 }
 
