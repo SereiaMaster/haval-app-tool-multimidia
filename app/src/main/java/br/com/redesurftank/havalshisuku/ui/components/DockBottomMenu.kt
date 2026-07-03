@@ -279,15 +279,16 @@ fun RadialMenuContent(
                         modifier = Modifier.weight(1f),
                         onClick =
                                 bumpAnd {
-                                    // Abre o Impulse Dashboard (tela cheia). Definir o estado
-                                    // dispara o observeDashboardActivityState() no BottomBarService,
-                                    // que lança a ImpulseDashboardActivity.
+                                    // Abre o Impulse Dashboard (tela cheia). Ele é renderizado
+                                    // dentro da janela overlay fullscreen do BottomBarService
+                                    // (BottomBarMenus -> ExpandedImpulseDashboard), igual ao dock,
+                                    // então o painel nativo de HVAC cai atrás e não rouba o foco.
                                     //
                                     // Fecha o dock (isVisible=false): o conteúdo desce e a alça
                                     // some (isDashboardExpanded=true também a oculta e zera a
                                     // região de toque da barra, então ela não recebe clique).
-                                    // Ao fechar o dashboard, o dock permanece fechado e só a alça
-                                    // reaparece (ver ImpulseDashboardActivity.onBackPressed/onDestroy).
+                                    // Ao fechar o dashboard (collapseDashboard), o dock permanece
+                                    // fechado e só a alça reaparece.
                                     BottomBarState.closeRadialSubMenu()
                                     BottomBarState.isVisible = false
                                     BottomBarState.isDashboardExpanded = true

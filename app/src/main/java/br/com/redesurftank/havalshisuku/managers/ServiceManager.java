@@ -1648,11 +1648,6 @@ public class ServiceManager {
                     DisplayAppLauncher.INSTANCE.preserveCarPlayClusterContract("HVAC_PANEL_DISPLAY_" + value);
                     DisplayAppLauncher.INSTANCE.preserveAndroidAutoNativePanelContract("HVAC_PANEL_DISPLAY_" + value);
                 }
-                // Se o Impulse Dashboard (Activity em tela cheia) estiver aberto, o painel
-                // nativo de HVAC subiria por cima dele. Trazemos o dashboard de volta ao topo.
-                if (isHvacNativePanelValueActive(value)) {
-                    BottomBarService.requestDashboardReassertOverNativePanel("HVAC_PANEL_DISPLAY_" + value);
-                }
             }
             if (key.equals(CarConstants.BEAN_PUI_SCENE_NOTIFY.getValue())) {
                 maybeCounterPulseSceneNotify(value);
@@ -2137,20 +2132,6 @@ public class ServiceManager {
 
     public boolean isMaxAcActive() {
         return isMaxAcActive;
-    }
-
-    // Considera o painel nativo de HVAC "ativo" quando o valor de notificação não é
-    // vazio nem um dos tokens de inativo (0/false/off/null/{0,0,0,0}...).
-    private static boolean isHvacNativePanelValueActive(String value) {
-        if (value == null) return false;
-        String normalized = value.trim().toLowerCase(java.util.Locale.ROOT);
-        return !normalized.isEmpty()
-                && !normalized.equals("0")
-                && !normalized.equals("false")
-                && !normalized.equals("off")
-                && !normalized.equals("null")
-                && !normalized.equals("{0,0,0,0}")
-                && !normalized.equals("{0,0,0,0,0}");
     }
 
     private void enableMaxAcOn() {
