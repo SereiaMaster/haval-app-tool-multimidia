@@ -98,6 +98,7 @@ class BottomBarService : LifecycleService() {
     private var nativeMediaCenterSourceMonitorJob: Job? = null
     private var dashboardProjectionRestoreJob: Job? = null
     @Volatile private var dashboardControlFocusRestoreSuppressedUntilMs: Long = 0L
+    @Volatile private var lastDashboardNativePanelReassertAtMs: Long = 0L
     @Volatile private var nativeMediaCenterServiceBinder: IBinder? = null
     @Volatile private var nativeMediaCenterPlayServiceBinder: IBinder? = null
     @Volatile private var nativeMediaCenterCurrentSource: Int? = null
@@ -3219,6 +3220,46 @@ class BottomBarService : LifecycleService() {
         }
     }
 
+    // Quando o carro exibe o painel nativo de HVAC (ao ajustar o clima), ele sobe uma
+    // Activity da OEM por cima do Impulse Dashboard. Diferente da dock (que é uma janela
+    // overlay sempre no topo), o dashboard é uma Activity e acaba coberto. Aqui trazemos
+    // o dashboard de volta ao topo (REORDER_TO_FRONT, sem recriar) logo após o painel
+    // nativo aparecer, replicando a sensação de "não abrir o menu do carro".
+    private fun reassertDashboardOverNativePanel(reason: String) {
+        if (!BottomBarState.isDashboardExpanded) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastDashboardNativePanelReassertAtMs <
+                        DASHBOARD_NATIVE_PANEL_REASSERT_COOLDOWN_MS
+        ) {
+            return
+        }
+        lastDashboardNativePanelReassertAtMs = now
+        lifecycleScope.launch(Dispatchers.Main) {
+            delay(220)
+            if (!BottomBarState.isDashboardExpanded) return@launch
+            try {
+                startActivity(
+                        Intent(this@BottomBarService, ImpulseDashboardActivity::class.java)
+                                .addFlags(
+                                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                                                Intent.FLAG_ACTIVITY_SINGLE_TOP
+                                )
+                )
+                Log.w(
+                        "BottomBarService",
+                        "[$reason] Reasserting Impulse dashboard over native HVAC panel"
+                )
+            } catch (e: Exception) {
+                Log.e(
+                        "BottomBarService",
+                        "Error reasserting dashboard over native panel",
+                        e
+                )
+            }
+        }
+    }
+
     private fun restoreBarAfterExternalFocus(packageName: String?, reason: String) {
         if (!shouldRestoreBarAfterExternalFocusForTest(
                         packageName = packageName,
@@ -3803,6 +3844,7 @@ class BottomBarService : LifecycleService() {
         private const val ANDROID_AUTO_MUSIC_STATUS_PAUSED = 2
         private const val ANDROID_AUTO_PROGRESS_EXPLICIT_COMMAND_RESET_WINDOW_MS = 4_000L
         private const val DASHBOARD_CONTROL_FOCUS_SUPPRESS_MS = 1_500L
+        private const val DASHBOARD_NATIVE_PANEL_REASSERT_COOLDOWN_MS = 900L
         private const val PROJECTION_USB_STATE_PATH = "/sys/class/android_usb/android0/state"
         private const val CARPLAY_USB_MEDIA_STATE_POLL_MS = 1_500L
         private const val PROJECTION_USB_STATE_CACHE_MS = 3_000L
@@ -3902,6 +3944,11 @@ class BottomBarService : LifecycleService() {
 
         fun suppressDashboardControlFocusRestore(reason: String = "dashboard_control") {
             instance?.suppressDashboardControlFocusRestore(reason)
+        }
+
+        @JvmStatic
+        fun requestDashboardReassertOverNativePanel(reason: String) {
+            instance?.reassertDashboardOverNativePanel(reason)
         }
 
         @JvmStatic

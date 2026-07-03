@@ -328,14 +328,11 @@ private fun DockBottomBarContent() {
 
     val isACEnabled = hvacPower == "1"
 
-    // Qualquer ajuste manual do clima (temperatura, ventilação, sync) com o Auto ligado
-    // deve assumir o controle e desligar o Auto.
-    val disableAutoIfActive: () -> Unit = {
-        if (acAuto == "1") {
-            acAuto = "0"
-            serviceManager.updateData(CarConstants.CAR_HVAC_AUTO_ENABLE.getValue(), "0")
-        }
-    }
+    // Comportamento de clima idêntico ao cluster (AcControlScreen): NÃO forçamos
+    // AUTO=0 ao ajustar temperatura/ventilação. O carro gerencia o AUTO sozinho
+    // (mexer na ventilação desliga o AUTO nativamente), e o estado do botão AUTO é
+    // refletido pelo listener de CAR_HVAC_AUTO_ENABLE. Em cada ajuste chamamos
+    // cancelMaxAcMode() como o cluster faz.
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
         // Transição: a dock sobe ao abrir e desce ao fechar.
@@ -376,7 +373,7 @@ private fun DockBottomBarContent() {
                         energyRecovery = energyRecovery,
                         steeringMode = steeringMode,
                         onDriverTempChange = { delta ->
-                            disableAutoIfActive()
+                            // Igual ao cluster: só ajusta a temperatura e cancela o MAX AC.
                             val newTemp =
                                     ((driverTemp.toFloatOrNull() ?: 22.0f) + delta)
                                             .coerceIn(16.0f, 32.0f)
@@ -384,9 +381,9 @@ private fun DockBottomBarContent() {
                                     CarConstants.CAR_HVAC_DRIVER_TEMPERATURE.getValue(),
                                     String.format(java.util.Locale.US, "%.1f", newTemp)
                             )
+                            serviceManager.cancelMaxAcMode()
                         },
                         onPassTempChange = { delta ->
-                            disableAutoIfActive()
                             val newTemp =
                                     ((passTemp.toFloatOrNull() ?: 22.0f) + delta)
                                             .coerceIn(16.0f, 32.0f)
@@ -394,26 +391,29 @@ private fun DockBottomBarContent() {
                                     CarConstants.CAR_HVAC_PASS_TEMPERATURE.getValue(),
                                     String.format(java.util.Locale.US, "%.1f", newTemp)
                             )
+                            serviceManager.cancelMaxAcMode()
                         },
                         onFanChange = { delta ->
-                            // Mexer manualmente na ventilação assume o controle: desliga o Auto.
-                            disableAutoIfActive()
+                            // Mesma lógica/ordem do cluster (AcControlScreen): define o
+                            // power mode primeiro, depois a ventilação. O carro desliga o
+                            // AUTO nativamente ao mexer na ventilação (não forçamos AUTO=0).
                             val calculatedSpeed = (fanSpeed + delta).coerceIn(0, 7)
-                            serviceManager.updateData(
-                                    CarConstants.CAR_HVAC_FAN_SPEED.getValue(),
-                                    calculatedSpeed.toString()
-                            )
-                            if (calculatedSpeed == 0 && hvacPower == "1") {
+                            if (calculatedSpeed == 0) {
                                 serviceManager.updateData(
                                         CarConstants.CAR_HVAC_POWER_MODE.getValue(),
                                         "0"
                                 )
-                            } else if (calculatedSpeed > 0 && hvacPower == "0") {
+                            } else if (hvacPower == "0") {
                                 serviceManager.updateData(
                                         CarConstants.CAR_HVAC_POWER_MODE.getValue(),
                                         "1"
                                 )
                             }
+                            serviceManager.updateData(
+                                    CarConstants.CAR_HVAC_FAN_SPEED.getValue(),
+                                    calculatedSpeed.toString()
+                            )
+                            serviceManager.cancelMaxAcMode()
                         },
                         onVolumeChange = { delta ->
                             val newVol = (volume + delta).coerceIn(0, 30)
@@ -456,22 +456,22 @@ private fun DockBottomBarContent() {
                             )
                         },
                         onSyncToggle = {
-                            disableAutoIfActive()
                             val next = if (acSync == "1") "0" else "1"
                             serviceManager.updateData(
                                     CarConstants.CAR_HVAC_SYNC_ENABLE.getValue(),
                                     next
                             )
+                            serviceManager.cancelMaxAcMode()
                         },
                         onAutoToggle = {
-                            // Ativar o Auto entrega o controle total ao carro (desconsidera
-                            // ajustes manuais); só alterna o modo automático.
+                            // Igual ao cluster (ENTER_LONG): alterna o AUTO e cancela o MAX AC.
                             val next = if (acAuto == "1") "0" else "1"
                             acAuto = next
                             serviceManager.updateData(
                                     CarConstants.CAR_HVAC_AUTO_ENABLE.getValue(),
                                     next
                             )
+                            serviceManager.cancelMaxAcMode()
                         },
                         onACPowerToggle = {
                             val next = if (hvacPower == "1") "0" else "1"
