@@ -71,6 +71,10 @@ enum class SharedPreferencesKeys(val key: String, val description: String) {
             "Data da próxima revisão no painel de instrumentos"
     ),
     DISABLE_AVAS("disableAvas", "Desativar AVAS (sistema de alerta de veículo silencioso)"),
+    DISABLE_SEAT_BELT_WARNING(
+            "disableSeatBeltWarning",
+            "Desativar aviso/alarme de cinto de segurança"
+    ),
     DISABLE_AVM_CAR_STOPPED(
             "disableAvmCarStopped",
             "Desativar camera AVM quando o carro está parado"

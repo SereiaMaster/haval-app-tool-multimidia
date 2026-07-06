@@ -2553,44 +2553,13 @@ fun BottomBarMenus() {
         }
 
         val dashboardExpanded = BottomBarState.isDashboardExpanded
-        // Mantém o painel montado durante a animação de saída (slide down) e controla o
-        // progresso 0..1 (0 = totalmente fora embaixo, 1 = totalmente aberto no topo),
-        // espelhando o slide up de entrada.
-        var dashboardMounted by remember { mutableStateOf(dashboardExpanded) }
-        val dashboardSlide = remember { Animatable(if (dashboardExpanded) 1f else 0f) }
-        LaunchedEffect(dashboardExpanded) {
-                if (dashboardExpanded) {
-                        dashboardMounted = true
-                        dashboardSlide.animateTo(
-                                1f,
-                                animationSpec = tween(durationMillis = 340, easing = FastOutSlowInEasing)
-                        )
-                } else if (dashboardMounted) {
-                        dashboardSlide.animateTo(
-                                0f,
-                                animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing)
-                        )
-                        dashboardMounted = false
-                }
-        }
-
-        val anyMenuOpen =
-                BottomBarState.isMenuExpanded ||
-                        BottomBarState.isSettingsMenuExpanded ||
-                        BottomBarState.isOverrideMenuExpanded ||
-                        BottomBarState.activeSliderType != null
 
         Box(
                 modifier =
                         Modifier.fillMaxSize()
                                 .background(
-                                        // Durante o dashboard (inclusive na saída) o próprio
-                                        // painel é opaco, então o fundo fica transparente para o
-                                        // slide down revelar a tela. O scrim escuro é só para os
-                                        // menus.
-                                        if (dashboardMounted) Color.Transparent
-                                        else if (anyMenuOpen) Color.Black.copy(alpha = 0.4f)
-                                        else Color.Transparent
+                                        if (dashboardExpanded) Color(0xFF05070A)
+                                        else Color.Black.copy(alpha = 0.4f)
                                 )
                                 .pointerInput(appMenuBounds, secondaryMenuBounds, dashboardExpanded) {
                                         if (!dashboardExpanded) {
@@ -2624,16 +2593,8 @@ fun BottomBarMenus() {
                                 },
                 contentAlignment = Alignment.BottomCenter
         ) {
-                if (dashboardMounted) {
-                        Box(
-                                modifier =
-                                        Modifier.fillMaxSize().graphicsLayer {
-                                                // 1 = aberto (0px), 0 = fora embaixo (+altura).
-                                                translationY = (1f - dashboardSlide.value) * size.height
-                                        }
-                        ) {
-                                ExpandedImpulseDashboard()
-                        }
+                if (dashboardExpanded) {
+                        ExpandedImpulseDashboard()
                 } else {
                         // We use a Box with fillMaxWidth to contain our menus at the bottom
                         Box(
@@ -3361,9 +3322,8 @@ private fun ExpandedImpulseDashboard() {
                         modifier =
                                 Modifier.fillMaxSize()
                                         .graphicsLayer {
-                                                // O slide (translationY) é feito pelo wrapper em
-                                                // BottomBarMenus (abre/fecha), aqui só o fade.
                                                 alpha = 0.82f + (0.18f * entryProgress.value)
+                                                translationY = (1f - entryProgress.value) * 180f
                                         }
                                         .padding(
                                                 start = 18.dp,

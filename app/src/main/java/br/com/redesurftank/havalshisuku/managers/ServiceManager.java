@@ -467,47 +467,10 @@ public class ServiceManager {
                                 lastClusterInputAtMs == 0L
                                         ? -1L
                                         : now - lastClusterInputAtMs;
-                        long sinceSyntheticMs =
-                                lastSyntheticClusterCardNavigationAtMs == 0L
-                                        ? -1L
-                                        : now - lastSyntheticClusterCardNavigationAtMs;
-                        if (ClusterCardSyncPolicy.shouldIgnoreNativeClusterCardChanged(
-                                previousCard,
-                                whichCard,
-                                sinceInputMs,
-                                lastClusterInputKeyCode,
-                                sinceSyntheticMs,
-                                lastSyntheticClusterCardTarget
-                        )) {
-                            Log.w(
-                                    TAG,
-                                    "Ignoring stale native cluster card change: "
-                                            + previousCard
-                                            + " -> "
-                                            + whichCard
-                                            + " lastInputKey="
-                                            + lastClusterInputKeyName
-                                            + "("
-                                            + lastClusterInputKeyCode
-                                            + ") sinceInputMs="
-                                            + sinceInputMs
-                                            + " syntheticTarget="
-                                            + lastSyntheticClusterCardTarget
-                                            + " sinceSyntheticMs="
-                                            + sinceSyntheticMs
-                            );
-                            logPersistentClusterEvent(
-                                    "native_cluster_card_ignored",
-                                    "from=" + previousCard
-                                            + " to=" + whichCard
-                                            + " lastInputKey=" + lastClusterInputKeyName
-                                            + "(" + lastClusterInputKeyCode + ")"
-                                            + " sinceInputMs=" + sinceInputMs
-                                            + " syntheticTarget=" + lastSyntheticClusterCardTarget
-                                            + " sinceSyntheticMs=" + sinceSyntheticMs
-                            );
-                            return;
-                        }
+                        // Master parity: o app NAO decide o card. Ele apenas espelha o
+                        // card informado pelo carro (whichCard). Sem filtro de "ignorar"
+                        // e sem navegacao sintetica, o card fica exatamente onde o
+                        // usuario deixar e so muda quando o proprio carro trocar.
                         clusterCardView = whichCard;
                         dispatchServiceManagerEvent(ServiceManagerEventType.CLUSTER_CARD_CHANGED, clusterCardView);
                         Log.w(
@@ -672,9 +635,11 @@ public class ServiceManager {
                             if (!duplicateClusterInput) {
                                 lastHandledClusterInputKeyCode = keyEvent.getKeyCode();
                                 lastHandledClusterInputAtMs = now;
-                                if (key == Screen.Key.LEFT || key == Screen.Key.RIGHT) {
-                                    handleClusterCardNavigationKey(key);
-                                } else {
+                                // Master parity: LEFT/RIGHT NAO sao tratados pelo app. Vao
+                                // direto pro carro, que troca o card de verdade e reporta via
+                                // msgId 133. Sem isso o app fazia navegacao sintetica e brigava
+                                // com o carro, resultando no card "voltando pro menu" sozinho.
+                                if (key != Screen.Key.LEFT && key != Screen.Key.RIGHT) {
                                     MainUiManager.getInstance().handleGeneralKeyEvents(key);
                                     if (key == Screen.Key.BACK) {
                                         dispatchServiceManagerEvent(ServiceManagerEventType.DISMISS_WARNING);
@@ -806,6 +771,7 @@ public class ServiceManager {
             }
             if (sharedPreferences.getBoolean(SharedPreferencesKeys.DISABLE_MONITORING.getKey(), false)) setMonitoringEnabled(false);
             if (sharedPreferences.getBoolean(SharedPreferencesKeys.DISABLE_AVAS.getKey(), false)) setAvasEnabled(false);
+            if (sharedPreferences.getBoolean(SharedPreferencesKeys.DISABLE_SEAT_BELT_WARNING.getKey(), false)) setSeatBeltWarningEnabled(false);
             if (sharedPreferences.getBoolean(SharedPreferencesKeys.ENABLE_AUTO_BRIGHTNESS.getKey(), false)) AutoBrightnessManager.Companion.getInstance().setEnabled(true);
             if (sharedPreferences.getBoolean(SharedPreferencesKeys.ENABLE_FRIDA_HOOKS.getKey(), false)) pendingTasks.add(this::initializeFrida);
             ensureSteeringWheelButtonIntegration();
@@ -1648,6 +1614,11 @@ public class ServiceManager {
                     DisplayAppLauncher.INSTANCE.preserveCarPlayClusterContract("HVAC_PANEL_DISPLAY_" + value);
                     DisplayAppLauncher.INSTANCE.preserveAndroidAutoNativePanelContract("HVAC_PANEL_DISPLAY_" + value);
                 }
+                // Se o Impulse Dashboard (Activity em tela cheia) estiver aberto, o painel
+                // nativo de HVAC subiria por cima dele. Trazemos o dashboard de volta ao topo.
+                if (isHvacNativePanelValueActive(value)) {
+                    BottomBarService.requestDashboardReassertOverNativePanel("HVAC_PANEL_DISPLAY_" + value);
+                }
             }
             if (key.equals(CarConstants.BEAN_PUI_SCENE_NOTIFY.getValue())) {
                 maybeCounterPulseSceneNotify(value);
@@ -1664,6 +1635,13 @@ public class ServiceManager {
                 if (isForceDisableAVAS) {
                     setAvasEnabled(false);
                     Log.w(TAG, "AVAS disabled by user preference");
+                }
+            }
+            if (key.equals(CarConstants.CAR_CONFIGURE_SEAT_BELT_WARNING.getValue()) && value.equals("1")) {
+                boolean isForceDisableSeatBelt = sharedPreferences.getBoolean(SharedPreferencesKeys.DISABLE_SEAT_BELT_WARNING.getKey(), false);
+                if (isForceDisableSeatBelt) {
+                    setSeatBeltWarningEnabled(false);
+                    Log.w(TAG, "Seat belt warning disabled by user preference");
                 }
             } else if ((key.equals(CarConstants.CAR_DMS_WORK_STATE.getValue()) && value.equals("0"))) {
                 boolean closeWindowOnPowerOff = sharedPreferences.getBoolean(SharedPreferencesKeys.CLOSE_WINDOW_ON_POWER_OFF.getKey(), false);
@@ -1953,6 +1931,19 @@ public class ServiceManager {
         }
     }
 
+    public void setSeatBeltWarningEnabled(boolean b) {
+        if (!isControlServiceAlive()) {
+            Log.e(TAG, "ControlService not initialized");
+            return;
+        }
+        try {
+            controlService.request("cmd.common.request.set", CarConstants.CAR_CONFIGURE_SEAT_BELT_WARNING.getValue(), b ? "1" : "0");
+            Log.w(TAG, "Seat belt warning enabled: " + b);
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting seat belt warning", e);
+        }
+    }
+
     private boolean currentBluetoothState() {
         try {
             BluetoothManager bluetoothManager = (BluetoothManager) App.getContext().getSystemService(Context.BLUETOOTH_SERVICE);
@@ -2132,6 +2123,20 @@ public class ServiceManager {
 
     public boolean isMaxAcActive() {
         return isMaxAcActive;
+    }
+
+    // Considera o painel nativo de HVAC "ativo" quando o valor de notificação não é
+    // vazio nem um dos tokens de inativo (0/false/off/null/{0,0,0,0}...).
+    private static boolean isHvacNativePanelValueActive(String value) {
+        if (value == null) return false;
+        String normalized = value.trim().toLowerCase(java.util.Locale.ROOT);
+        return !normalized.isEmpty()
+                && !normalized.equals("0")
+                && !normalized.equals("false")
+                && !normalized.equals("off")
+                && !normalized.equals("null")
+                && !normalized.equals("{0,0,0,0}")
+                && !normalized.equals("{0,0,0,0,0}");
     }
 
     private void enableMaxAcOn() {

@@ -42,6 +42,7 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import br.com.redesurftank.havalshisuku.ImpulseDashboardActivity
 import br.com.redesurftank.havalshisuku.BuildConfig
 import br.com.redesurftank.havalshisuku.R
 import br.com.redesurftank.havalshisuku.listeners.IDataChanged
@@ -97,6 +98,7 @@ class BottomBarService : LifecycleService() {
     private var nativeMediaCenterSourceMonitorJob: Job? = null
     private var dashboardProjectionRestoreJob: Job? = null
     @Volatile private var dashboardControlFocusRestoreSuppressedUntilMs: Long = 0L
+    @Volatile private var lastDashboardNativePanelReassertAtMs: Long = 0L
     @Volatile private var nativeMediaCenterServiceBinder: IBinder? = null
     @Volatile private var nativeMediaCenterPlayServiceBinder: IBinder? = null
     @Volatile private var nativeMediaCenterCurrentSource: Int? = null
@@ -3175,36 +3177,14 @@ class BottomBarService : LifecycleService() {
 
     private fun observeMenuState() {
         lifecycleScope.launch {
-            // Primeiro = há menu/slider aberto; segundo = dashboard aberto.
-            // O Impulse Dashboard é renderizado DENTRO desta janela overlay fullscreen
-            // (BottomBarMenus -> ExpandedImpulseDashboard), igual ao dock. Assim o painel
-            // nativo de HVAC cai atrás do overlay (sempre no topo), do mesmo jeito que já
-            // acontece no dock/cluster — sem precisar desabilitar o app de HVAC.
-            var wasDashboard = false
             snapshotFlow {
-                val menus =
-                        BottomBarState.isMenuExpanded ||
-                                BottomBarState.isSettingsMenuExpanded ||
-                                BottomBarState.isOverrideMenuExpanded ||
-                                BottomBarState.activeSliderType != null
-                Pair(menus, BottomBarState.isDashboardExpanded)
+                BottomBarState.isMenuExpanded ||
+                        BottomBarState.isSettingsMenuExpanded ||
+                        BottomBarState.isOverrideMenuExpanded ||
+                        BottomBarState.activeSliderType != null
             }
-                    .distinctUntilChanged()
-                    .collectLatest { (menus, dashboard) ->
-                        val shouldShow = menus || dashboard
-                        if (shouldShow) {
-                            updateMenuWindow(true)
-                        } else {
-                            // Ao fechar o dashboard, mantemos a janela aberta por um instante
-                            // para o conteúdo tocar a animação de saída (slide down) antes de
-                            // a superfície ser removida. Se reabrir nesse meio-tempo, o
-                            // collectLatest cancela este atraso.
-                            if (wasDashboard) {
-                                delay(DASHBOARD_EXIT_ANIM_MS)
-                            }
-                            updateMenuWindow(false)
-                        }
-                        wasDashboard = dashboard
+                    .collectLatest { expanded ->
+                        updateMenuWindow(expanded)
                         // Force recompute touchable regions when menu state changes
                         composeView?.requestLayout()
                         menuComposeView?.requestLayout()
@@ -3216,13 +3196,67 @@ class BottomBarService : LifecycleService() {
         lifecycleScope.launch {
             snapshotFlow { BottomBarState.isDashboardExpanded }
                     .distinctUntilChanged()
-                    .collectLatest { _ ->
-                        // O dashboard agora vive na janela overlay fullscreen (ver
-                        // observeMenuState/BottomBarMenus). Aqui só forçamos um relayout para
-                        // as regiões de toque serem recalculadas na transição.
+                    .collectLatest { expanded ->
+                        if (expanded) {
+                            launchDashboardActivity()
+                        }
                         composeView?.requestLayout()
                         menuComposeView?.requestLayout()
                     }
+        }
+    }
+
+    private fun launchDashboardActivity() {
+        try {
+            startActivity(
+                    ImpulseDashboardActivity.createIntent(this)
+                            .addFlags(
+                                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                                            Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            )
+            )
+        } catch (e: Exception) {
+            Log.e("BottomBarService", "Error launching fullscreen dashboard activity", e)
+        }
+    }
+
+    // Quando o carro exibe o painel nativo de HVAC (ao ajustar o clima), ele sobe uma
+    // Activity da OEM por cima do Impulse Dashboard. Diferente da dock (que é uma janela
+    // overlay sempre no topo), o dashboard é uma Activity e acaba coberto. Aqui trazemos
+    // o dashboard de volta ao topo (REORDER_TO_FRONT, sem recriar) logo após o painel
+    // nativo aparecer, replicando a sensação de "não abrir o menu do carro".
+    private fun reassertDashboardOverNativePanel(reason: String) {
+        if (!BottomBarState.isDashboardExpanded) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastDashboardNativePanelReassertAtMs <
+                        DASHBOARD_NATIVE_PANEL_REASSERT_COOLDOWN_MS
+        ) {
+            return
+        }
+        lastDashboardNativePanelReassertAtMs = now
+        lifecycleScope.launch(Dispatchers.Main) {
+            delay(220)
+            if (!BottomBarState.isDashboardExpanded) return@launch
+            try {
+                startActivity(
+                        Intent(this@BottomBarService, ImpulseDashboardActivity::class.java)
+                                .addFlags(
+                                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                                                Intent.FLAG_ACTIVITY_SINGLE_TOP
+                                )
+                )
+                Log.w(
+                        "BottomBarService",
+                        "[$reason] Reasserting Impulse dashboard over native HVAC panel"
+                )
+            } catch (e: Exception) {
+                Log.e(
+                        "BottomBarService",
+                        "Error reasserting dashboard over native panel",
+                        e
+                )
+            }
         }
     }
 
@@ -3303,6 +3337,7 @@ class BottomBarService : LifecycleService() {
                     BottomBarState.isSettingsMenuExpanded = false
                     BottomBarState.isOverrideMenuExpanded = false
                     BottomBarState.activeSliderType = null
+                    launchDashboardActivity()
                 }
     }
 
@@ -3321,6 +3356,9 @@ class BottomBarService : LifecycleService() {
             BottomBarState.activeSliderType = null
             composeView?.requestLayout()
             menuComposeView?.requestLayout()
+            if (targetExpanded) {
+                launchDashboardActivity()
+            }
         }
     }
 
@@ -3371,8 +3409,8 @@ class BottomBarService : LifecycleService() {
                 withContext(Dispatchers.Main) {
                     // NÃO resetar isDashboardExpanded aqui: o dock pode ser minimizado
                     // (isVisible=false) justamente para abrir o Dashboard em tela cheia.
-                    // O fechamento do dashboard (collapseDashboard) e os toggles é que
-                    // controlam essa flag.
+                    // O ciclo de vida da ImpulseDashboardActivity (onBackPressed/onDestroy)
+                    // e os toggles é que controlam essa flag.
                     BottomBarState.isMenuExpanded = false
                     BottomBarState.isSettingsMenuExpanded = false
                     BottomBarState.isOverrideMenuExpanded = false
@@ -3412,7 +3450,6 @@ class BottomBarService : LifecycleService() {
                     mp.width = 0
                     mp.height = 0
                     mp.flags = mp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                    mv.visibility = android.view.View.GONE
                 }
                 wm.addView(mv, mp)
                 isMenuWindowAdded = true
@@ -3435,15 +3472,10 @@ class BottomBarService : LifecycleService() {
                 mp.y = 0
                 mp.gravity = Gravity.TOP or Gravity.START
                 mp.flags = mp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-                mv.visibility = android.view.View.VISIBLE
             } else {
                 mp.width = 0
                 mp.height = 0
                 mp.flags = mp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                // O conteúdo do dashboard é opaco e cobre a tela toda. Só redimensionar a
-                // janela para 0x0 pode deixar o último frame "congelado" na tela em alguns
-                // firmwares. Marcar a view como GONE força a superfície a ser limpa.
-                mv.visibility = android.view.View.GONE
             }
             wm.updateViewLayout(mv, mp)
         } catch (e: Exception) {
@@ -3812,10 +3844,7 @@ class BottomBarService : LifecycleService() {
         private const val ANDROID_AUTO_MUSIC_STATUS_PAUSED = 2
         private const val ANDROID_AUTO_PROGRESS_EXPLICIT_COMMAND_RESET_WINDOW_MS = 4_000L
         private const val DASHBOARD_CONTROL_FOCUS_SUPPRESS_MS = 1_500L
-        // Mantém a janela overlay do dashboard aberta enquanto a animação de saída
-        // (slide down) toca, antes de remover a superfície. Deve ser >= a duração da
-        // animação de saída no Compose.
-        private const val DASHBOARD_EXIT_ANIM_MS = 380L
+        private const val DASHBOARD_NATIVE_PANEL_REASSERT_COOLDOWN_MS = 900L
         private const val PROJECTION_USB_STATE_PATH = "/sys/class/android_usb/android0/state"
         private const val CARPLAY_USB_MEDIA_STATE_POLL_MS = 1_500L
         private const val PROJECTION_USB_STATE_CACHE_MS = 3_000L
@@ -3896,9 +3925,6 @@ class BottomBarService : LifecycleService() {
                         NATIVE_LAUNCHER_PACKAGE,
                         NATIVE_MEDIA_CENTER_PACKAGE,
                         "com.beantechs.mediacenter.h5.core",
-                        // App nativo de HVAC: se ele ganhar foco (popup de clima) com o
-                        // dashboard aberto, NÃO devemos fechar o dashboard/reabrir o dock.
-                        "com.beantechs.hvac",
                         NATIVE_VEHICLE_CENTER_PACKAGE,
                         CARPLAY_MEDIA_PACKAGE,
                         CARPLAY_MEDIA_APP_PACKAGE,
@@ -3918,6 +3944,11 @@ class BottomBarService : LifecycleService() {
 
         fun suppressDashboardControlFocusRestore(reason: String = "dashboard_control") {
             instance?.suppressDashboardControlFocusRestore(reason)
+        }
+
+        @JvmStatic
+        fun requestDashboardReassertOverNativePanel(reason: String) {
+            instance?.reassertDashboardOverNativePanel(reason)
         }
 
         @JvmStatic

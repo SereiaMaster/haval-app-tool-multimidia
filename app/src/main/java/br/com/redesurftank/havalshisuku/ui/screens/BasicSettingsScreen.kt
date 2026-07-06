@@ -67,6 +67,11 @@ fun BasicSettingsTab() {
         var disableAvas by remember {
                 mutableStateOf(prefs.getBoolean(SharedPreferencesKeys.DISABLE_AVAS.key, false))
         }
+        var disableSeatBeltWarning by remember {
+                mutableStateOf(
+                        prefs.getBoolean(SharedPreferencesKeys.DISABLE_SEAT_BELT_WARNING.key, false)
+                )
+        }
         var disableAvmCarStopped by remember {
                 mutableStateOf(
                         prefs.getBoolean(SharedPreferencesKeys.DISABLE_AVM_CAR_STOPPED.key, false)
@@ -1491,6 +1496,25 @@ fun BasicSettingsTab() {
                                                 )
                                         }
                                         ServiceManager.getInstance().setAvasEnabled(!it)
+                                }
+                        ),
+                        SettingItem(
+                                title = "Desativar aviso de cinto",
+                                description =
+                                        "Silencia o aviso/alarme de cinto de segurança (pode não funcionar se o carro travar esse alerta)",
+                                checked = disableSeatBeltWarning,
+                                onCheckedChange = {
+                                        disableSeatBeltWarning = it
+                                        prefs.edit {
+                                                putBoolean(
+                                                        SharedPreferencesKeys
+                                                                .DISABLE_SEAT_BELT_WARNING
+                                                                .key,
+                                                        it
+                                                )
+                                        }
+                                        ServiceManager.getInstance()
+                                                .setSeatBeltWarningEnabled(!it)
                                 }
                         ),
                         SettingItem(
