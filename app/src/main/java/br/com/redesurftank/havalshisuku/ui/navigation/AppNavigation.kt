@@ -7,6 +7,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -62,7 +64,11 @@ fun MainScreen(modifier: Modifier = Modifier) {
             color = Color(0xFF13151A),
             shadowElevation = 4.dp
         ) {
-            Column(modifier = Modifier.fillMaxHeight()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState())
+            ) {
                 menuItems.forEachIndexed { index, item ->
                     val animatedWidth by animateFloatAsState(
                         targetValue = if (selectedItem == index) 1f else 0f,
@@ -153,6 +159,7 @@ fun MainScreen(modifier: Modifier = Modifier) {
                     "Recursos" -> FeaturesHubScreen()
                     "Reportar problema" -> ProblemReportTab()
                     "Informações" -> InformacoesTab()
+                    "Luz Ambiente" -> AmbientTestTab()
                     "Frida Hooks" -> FridaHooksTab()
                     else -> BasicSettingsTab()
                 }
