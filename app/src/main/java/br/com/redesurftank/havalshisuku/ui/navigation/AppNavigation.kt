@@ -159,7 +159,6 @@ fun MainScreen(modifier: Modifier = Modifier) {
                     "Recursos" -> FeaturesHubScreen()
                     "Reportar problema" -> ProblemReportTab()
                     "Informações" -> InformacoesTab()
-                    "Luz Ambiente" -> AmbientTestTab()
                     "Frida Hooks" -> FridaHooksTab()
                     else -> BasicSettingsTab()
                 }

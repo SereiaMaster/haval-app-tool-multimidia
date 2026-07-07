@@ -12,7 +12,6 @@ data class NavigationItem(
 val menuItems = listOf(
     NavigationItem("Configurações", Icons.Default.Settings),
     NavigationItem("Telas", Icons.Default.SmartDisplay),
-    NavigationItem("Luz Ambiente", Icons.Default.Lightbulb),
     NavigationItem("Valores Atuais", Icons.Default.DeveloperMode),
     NavigationItem("Instalar Apps", Icons.Default.ShoppingCart),
     NavigationItem("Recursos", Icons.Default.Apps),
