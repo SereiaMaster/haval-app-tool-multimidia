@@ -467,10 +467,29 @@ public class ServiceManager {
                                 lastClusterInputAtMs == 0L
                                         ? -1L
                                         : now - lastClusterInputAtMs;
-                        // Master parity: o app NAO decide o card. Ele apenas espelha o
-                        // card informado pelo carro (whichCard). Sem filtro de "ignorar"
-                        // e sem navegacao sintetica, o card fica exatamente onde o
-                        // usuario deixar e so muda quando o proprio carro trocar.
+                        long sinceSyntheticMs =
+                                lastSyntheticClusterCardNavigationAtMs == 0L
+                                        ? -1L
+                                        : now - lastSyntheticClusterCardNavigationAtMs;
+                        // O app navega os cards (navegacao sintetica via LEFT/RIGHT). Depois
+                        // que o usuario escolhe um card, seguramos essa escolha e ignoramos
+                        // as reafirmacoes do carro (que insiste em voltar pro menu) ate a
+                        // proxima navegacao do usuario. Assim o card fica onde ele deixar.
+                        if (ClusterCardSyncPolicy.shouldIgnoreNativeClusterCardChanged(
+                                previousCard,
+                                whichCard,
+                                sinceInputMs,
+                                lastClusterInputKeyCode,
+                                sinceSyntheticMs,
+                                lastSyntheticClusterCardTarget
+                        )) {
+                            logPersistentClusterEvent(
+                                    "native_cluster_card_ignored",
+                                    "from=" + previousCard + " to=" + whichCard
+                                            + " syntheticTarget=" + lastSyntheticClusterCardTarget
+                            );
+                            return;
+                        }
                         clusterCardView = whichCard;
                         dispatchServiceManagerEvent(ServiceManagerEventType.CLUSTER_CARD_CHANGED, clusterCardView);
                         Log.w(
@@ -635,11 +654,11 @@ public class ServiceManager {
                             if (!duplicateClusterInput) {
                                 lastHandledClusterInputKeyCode = keyEvent.getKeyCode();
                                 lastHandledClusterInputAtMs = now;
-                                // Master parity: LEFT/RIGHT NAO sao tratados pelo app. Vao
-                                // direto pro carro, que troca o card de verdade e reporta via
-                                // msgId 133. Sem isso o app fazia navegacao sintetica e brigava
-                                // com o carro, resultando no card "voltando pro menu" sozinho.
-                                if (key != Screen.Key.LEFT && key != Screen.Key.RIGHT) {
+                                // LEFT/RIGHT navegam entre os cards {nativo(0), menu(1),
+                                // ar(3)} via navegacao sintetica (o carro nao troca sozinho).
+                                if (key == Screen.Key.LEFT || key == Screen.Key.RIGHT) {
+                                    handleClusterCardNavigationKey(key);
+                                } else {
                                     MainUiManager.getInstance().handleGeneralKeyEvents(key);
                                     if (key == Screen.Key.BACK) {
                                         dispatchServiceManagerEvent(ServiceManagerEventType.DISMISS_WARNING);

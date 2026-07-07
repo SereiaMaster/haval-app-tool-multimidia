@@ -29,9 +29,12 @@ public final class ClusterCardSyncPolicy {
     }
 
     private static boolean isRecentSyntheticClusterCardNavigation(long sinceSyntheticMs, int lastSyntheticTarget) {
-        return lastSyntheticTarget >= 0
-                && sinceSyntheticMs >= 0L
-                && sinceSyntheticMs <= SYNTHETIC_CLUSTER_CARD_ECHO_WINDOW_MS;
+        // Sticky: uma vez que o usuario navegou para um card (LEFT/RIGHT), o app
+        // segura essa escolha e ignora as reafirmacoes do carro (que insiste em
+        // voltar pro menu) ate a proxima navegacao do usuario. Sem janela de tempo:
+        // com o limite anterior (SYNTHETIC_CLUSTER_CARD_ECHO_WINDOW_MS) o card
+        // "resetava" sozinho para o menu depois de alguns segundos.
+        return lastSyntheticTarget >= 0;
     }
 
     private static boolean isRecentClusterCardNavigationInput(int lastInputKeyCode, long sinceInputMs) {
