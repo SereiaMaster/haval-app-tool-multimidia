@@ -10,6 +10,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -51,6 +53,7 @@ private val Accent = Color(0xFF4A9EFF)
 @Composable
 fun AmbientTestTab() {
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
     val values = remember { mutableStateMapOf<String, String>() }
     var busy by remember { mutableStateOf(false) }
     var lastAction by remember { mutableStateOf("") }
@@ -100,6 +103,9 @@ fun AmbientTestTab() {
         else
             CarConstants.CAR_LIGHT_SETTING_AMBIENT_LIGHT_MULTICOLOR_COLOR_CONFIG.value
 
+    // Lê os valores atuais assim que a tela abre, para já revelarmos o formato/estado.
+    LaunchedEffect(Unit) { readAll() }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -131,11 +137,23 @@ fun AmbientTestTab() {
 
         // ---- Ler valores atuais ----
         Section("1) Valores atuais") {
-            Button(
-                onClick = { readAll() },
-                enabled = !busy,
-                colors = ButtonDefaults.buttonColors(containerColor = Accent)
-            ) { Text("Ler valores atuais", color = Color.White) }
+            RowButtons {
+                Button(
+                    onClick = { readAll() },
+                    enabled = !busy,
+                    colors = ButtonDefaults.buttonColors(containerColor = Accent)
+                ) { Text("Ler valores atuais", color = Color.White) }
+                Button(
+                    onClick = {
+                        val txt = values.toList().sortedBy { it.first }
+                            .joinToString("\n") { "${it.first}=${it.second}" }
+                        clipboard.setText(AnnotatedString(txt))
+                        lastAction = "valores copiados"
+                    },
+                    enabled = values.isNotEmpty(),
+                    colors = ButtonDefaults.buttonColors(containerColor = SectionBg)
+                ) { Text("Copiar valores", color = Color.White) }
+            }
 
             if (values.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
@@ -179,6 +197,24 @@ fun AmbientTestTab() {
                     write(CarConstants.CAR_LIGHT_SETTING_AMBIENT_LIGHT_DYNAMIC_MODE.value, "0")
                 }
             }
+        }
+
+        // ---- Zonas (motorista / passageiro / traseira) ----
+        Section("2b) Zonas (a luz do passageiro é a mais visível)") {
+            ZoneRow(
+                "Passageiro",
+                CarConstants.CAR_LIGHT_SETTING_PASSENGER_AMBIENT_LIGHT_ENABLE.value
+            ) { k, v -> write(k, v) }
+            Spacer(Modifier.height(6.dp))
+            ZoneRow(
+                "Motorista",
+                CarConstants.CAR_LIGHT_SETTING_DRIVER_AMBIENT_LIGHT_ENABLE.value
+            ) { k, v -> write(k, v) }
+            Spacer(Modifier.height(6.dp))
+            ZoneRow(
+                "Traseira",
+                CarConstants.CAR_LIGHT_SETTING_REAR_ROW_AMBIENT_LIGHT_ENABLE.value
+            ) { k, v -> write(k, v) }
         }
 
         // ---- Cor (experimental) ----
@@ -269,6 +305,16 @@ private fun Section(title: String, content: @Composable ColumnScope.() -> Unit) 
         Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
         content()
+    }
+}
+
+@Composable
+private fun ZoneRow(label: String, key: String, onWrite: (String, String) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        TestButton("Ligar") { onWrite(key, "1") }
+        Spacer(Modifier.width(8.dp))
+        TestButton("Desligar") { onWrite(key, "0") }
     }
 }
 

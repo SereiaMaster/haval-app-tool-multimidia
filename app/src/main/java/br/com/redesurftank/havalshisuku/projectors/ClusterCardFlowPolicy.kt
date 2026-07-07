@@ -27,10 +27,15 @@ internal object ClusterCardFlowPolicy {
     ): Boolean {
         // Card 0 = cluster nativo original do carro. Para o usuário poder "passar para o
         // lado" e ver o cluster de fábrica, escondemos o overlay nesse card (revelando o
-        // nativo por baixo). Mantemos o overlay quando há aviso ativo (precisa ser exibido)
-        // ou quando há projeção AA/CarPlay/espelhamento em andamento (não interromper).
+        // nativo por baixo) — igual ao master, que faz isso de forma incondicional
+        // (circularView.isVisible = card != 0).
+        //
+        // NAO bloqueamos por aviso: o cluster NATIVO exibe os proprios avisos do carro, entao
+        // esconder o overlay no card 0 durante um aviso e seguro (e o upstream so bloqueava
+        // aqui "para preservar o tema", que e justamente o que impedia de chegar no nativo).
+        // Mantemos o bloqueio por projecao AA/CarPlay/espelhamento para nao interromper uma
+        // sessao de projecao ativa.
         if (cardId != ClusterCardIds.NATIVE_CARD) return false
-        if (warningActive) return false
         if (projectionActive) return false
         return true
     }
