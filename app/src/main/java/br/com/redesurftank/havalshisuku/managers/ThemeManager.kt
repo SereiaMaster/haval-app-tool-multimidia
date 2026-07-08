@@ -42,6 +42,62 @@ class ThemeManager private constructor(val context: Context) {
         }
     }
 
+    /**
+     * Copia os temas embutidos em assets/themes para o diretorio de temas do app
+     * (filesDir/themes), tornando-os selecionaveis offline (sem depender do GitHub).
+     * So sobrescreve quando o tema ainda nao existe ou quando a versao embutida e mais nova.
+     */
+    fun seedBundledThemes() {
+        try {
+            val assetRoot = "themes"
+            val bundledFolders = context.assets.list(assetRoot) ?: return
+            for (folder in bundledFolders) {
+                val assetFolderPath = "$assetRoot/$folder"
+                val files = context.assets.list(assetFolderPath) ?: continue
+                if (files.isEmpty()) continue
+
+                val destDir = File(themesDir, folder)
+                val installedXml = File(destDir, "theme.xml")
+
+                val shouldSeed =
+                        if (!installedXml.exists()) {
+                            true
+                        } else {
+                            val bundledVersion = readBundledThemeVersion(folder)
+                            val installedVersion =
+                                    parseThemeXml(installedXml.inputStream(), folder, true)?.version
+                                            ?: ""
+                            bundledVersion.isNotEmpty() &&
+                                    installedVersion.isNotEmpty() &&
+                                    isNewerVersion(installedVersion, bundledVersion)
+                        }
+
+                if (!shouldSeed) continue
+
+                if (!destDir.exists()) destDir.mkdirs()
+                for (file in files) {
+                    context.assets.open("$assetFolderPath/$file").use { input ->
+                        FileOutputStream(File(destDir, file)).use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                }
+                Log.w(TAG, "Seeded bundled theme: $folder")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error seeding bundled themes", e)
+        }
+    }
+
+    private fun readBundledThemeVersion(folder: String): String {
+        return try {
+            parseThemeXml(context.assets.open("themes/$folder/theme.xml"), folder, true)?.version
+                    ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
     fun getLocalThemes(): List<ThemeMetadata> {
         val results = mutableListOf<ThemeMetadata>()
         

@@ -3,11 +3,9 @@ package br.com.redesurftank.havalshisuku.services
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.net.Uri
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.Region
@@ -18,6 +16,7 @@ import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.os.Parcel
@@ -30,20 +29,16 @@ import android.view.WindowManager
 import androidx.appcompat.view.ContextThemeWrapper
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.platform.ViewCompositionStrategy
-import android.view.ViewTreeObserver
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeViewModelStoreOwner
-import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import br.com.redesurftank.havalshisuku.ImpulseDashboardActivity
-import br.com.redesurftank.havalshisuku.BuildConfig
 import br.com.redesurftank.havalshisuku.R
 import br.com.redesurftank.havalshisuku.listeners.IDataChanged
 import br.com.redesurftank.havalshisuku.managers.DisplayAppLauncher
@@ -59,13 +54,18 @@ import br.com.redesurftank.havalshisuku.utils.ShizukuUtils
 import com.beantechs.mediacenter.core_common.data.MediaInfo
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.lsposed.hiddenapibypass.HiddenApiBypass
 import java.io.File
 import java.lang.reflect.Proxy
 import kotlin.math.roundToInt
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.distinctUntilChanged
-import org.lsposed.hiddenapibypass.HiddenApiBypass
 
 class BottomBarService : LifecycleService() {
 

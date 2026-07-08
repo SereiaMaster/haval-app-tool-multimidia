@@ -40,6 +40,26 @@ public class App extends Application {
         br.com.redesurftank.havalshisuku.managers.DisplayAppLauncher.ensureDefaultDesktopShortcuts();
         CarMockManager.ensureEnabledForEmulator(this);
 
+        // Semeia os temas embutidos (Basic/Basic Light) para ficarem selecionaveis offline
+        // e define o tema escuro classico (Basic) como padrao quando o usuario ainda nao escolheu.
+        new Thread(() -> {
+            try {
+                br.com.redesurftank.havalshisuku.managers.ThemeManager.Companion
+                        .getInstance(getContext())
+                        .seedBundledThemes();
+
+                android.content.SharedPreferences prefs = getDeviceProtectedContext()
+                        .getSharedPreferences("haval_prefs", Context.MODE_PRIVATE);
+                if (!prefs.contains(br.com.redesurftank.havalshisuku.models.SharedPreferencesKeys.VIRTUAL_CLUSTER_THEME.getKey())) {
+                    prefs.edit()
+                            .putString(br.com.redesurftank.havalshisuku.models.SharedPreferencesKeys.VIRTUAL_CLUSTER_THEME.getKey(), "Basic")
+                            .putString(br.com.redesurftank.havalshisuku.models.SharedPreferencesKeys.ACTIVE_CUSTOM_THEME.getKey(), "Basic")
+                            .apply();
+                }
+            } catch (Exception ignored) {
+            }
+        }).start();
+
         var context = getContext();
         Intent serviceIntent = new Intent(context, ForegroundService.class);
         context.startForegroundService(serviceIntent);

@@ -88,33 +88,15 @@ class ClusterCardFlowPolicyTest {
     }
 
     @Test
-    fun nativeCardPassThroughIsEnabledWhenNotProjecting() {
-        // Master parity: no card nativo (0) e sem projecao, revelamos o cluster de fabrica.
-        assertTrue(
+    fun nativeCardPassThroughIsDisabledToPreserveTheme() {
+        assertFalse(
                 ClusterCardFlowPolicy.shouldUseNativeCardPassThrough(
                         cardId = ClusterCardIds.NATIVE_CARD,
                         warningActive = false,
                         projectionActive = false
                 )
         )
-    }
 
-    @Test
-    fun nativeCardPassThroughStillEnabledDuringWarnings() {
-        // O cluster nativo mostra os proprios avisos, entao nao bloqueamos o pass-through
-        // durante avisos (era isso que impedia de chegar no cluster original do carro).
-        assertTrue(
-                ClusterCardFlowPolicy.shouldUseNativeCardPassThrough(
-                        cardId = ClusterCardIds.NATIVE_CARD,
-                        warningActive = true,
-                        projectionActive = false
-                )
-        )
-    }
-
-    @Test
-    fun nativeCardPassThroughIsDisabledDuringProjection() {
-        // Durante projecao AA/CarPlay/espelhamento nao interrompemos a sessao.
         assertFalse(
                 ClusterCardFlowPolicy.shouldUseNativeCardPassThrough(
                         cardId = ClusterCardIds.NATIVE_CARD,
@@ -125,11 +107,11 @@ class ClusterCardFlowPolicyTest {
     }
 
     @Test
-    fun nativeCardPassThroughIsDisabledForNonNativeCards() {
+    fun nativeCardPassThroughIsDisabledDuringWarnings() {
         assertFalse(
                 ClusterCardFlowPolicy.shouldUseNativeCardPassThrough(
-                        cardId = ClusterCardIds.MAIN_MENU_CARD,
-                        warningActive = false,
+                        cardId = ClusterCardIds.NATIVE_CARD,
+                        warningActive = true,
                         projectionActive = false
                 )
         )

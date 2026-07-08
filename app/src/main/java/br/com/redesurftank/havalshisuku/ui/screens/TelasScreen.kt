@@ -50,8 +50,10 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class RevisionEntry(val km: Int, val date: Long)
 
@@ -393,6 +395,8 @@ fun TelasTab() {
 
     // Refresh local themes on start just in case, and fetch from GitHub
     LaunchedEffect(Unit) {
+        // Garante que os temas embutidos (Basic/Basic Light) estejam disponiveis offline.
+        withContext(Dispatchers.IO) { ThemeManager.getInstance(context).seedBundledThemes() }
         localThemes = ThemeManager.getInstance(context).getLocalThemes()
         if (githubThemes.isEmpty()) {
             isFetchingThemes = true

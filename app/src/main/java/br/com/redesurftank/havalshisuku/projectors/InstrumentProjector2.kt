@@ -483,18 +483,6 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
         root.isVisible = visible && !hidden
         webView?.alpha = alpha
         webView?.visibility = if (hidden) View.INVISIBLE else View.VISIBLE
-        // Esconder apenas root/webView deixa a janela do Presentation cobrindo o
-        // display do cluster com o fundo preto -> no card nativo (pass-through)
-        // aparece "redondo preto" em vez do cluster original do carro. Zeramos o
-        // alpha da JANELA (igual ao bypass de projecao) para revelar o cluster
-        // nativo por baixo, e restauramos para 1 quando o overlay volta a aparecer.
-        window?.let { win ->
-            if (win.attributes.alpha != alpha) {
-                val attrs = win.attributes
-                attrs.alpha = alpha
-                win.attributes = attrs
-            }
-        }
         if (nativeCardPassThroughActive != nativeCardPassThrough) {
             nativeCardPassThroughActive = nativeCardPassThrough
             Log.w(
