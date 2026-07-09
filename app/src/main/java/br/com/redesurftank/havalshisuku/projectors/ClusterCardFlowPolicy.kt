@@ -25,12 +25,12 @@ internal object ClusterCardFlowPolicy {
             warningActive: Boolean,
             projectionActive: Boolean
     ): Boolean {
-        // Card 0 is the car's own navigable cluster region. Drop our Presentation
-        // entirely here so the native cluster (or the projection app on D3) shows
-        // through with zero paint from us. This is unconditional: projection state
-        // and warnings do not matter on card 0 — the user explicitly wants the
-        // circular region 100% released whenever card 0 is active.
-        return cardId == ClusterCardIds.NATIVE_CARD
+        // Card 0 is a neutral cluster state; hiding the Presentation drops the active theme.
+        // The native cluster is instead revealed by pausing the Android keep-alive heartbeat
+        // (see ServiceManager) so the car reclaims its native rendering, while the themed
+        // overlay simply fades out on card 0. Keeping this false lets the theme play its
+        // own fade animation before the heartbeat is released.
+        return false
     }
 
     fun decideCardChange(

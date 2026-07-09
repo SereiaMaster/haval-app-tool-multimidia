@@ -478,24 +478,11 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
                         projectionActive
                 )
         val hidden = bypassActive || nativeCardPassThrough
-        if (nativeCardPassThrough && !bypassActive) {
-            // Card 0: the car's cluster compositor grabs this window's surface
-            // buffer directly (it ignores window alpha). We must NOT make the views
-            // INVISIBLE/GONE — that stops drawing and leaves the last opaque frame
-            // frozen (a mirror of the previous card). Instead keep the surface alive
-            // and DRAWING, but fully transparent (alpha 0), so the car keeps getting
-            // fresh transparent frames and the native cluster shows through live.
-            root.alpha = 0f
-            root.isVisible = visible
-            webView?.alpha = 0f
-            webView?.visibility = View.VISIBLE
-        } else {
-            val alpha = if (hidden) 0f else 1f
-            root.alpha = alpha
-            root.isVisible = visible && !hidden
-            webView?.alpha = alpha
-            webView?.visibility = if (hidden) View.INVISIBLE else View.VISIBLE
-        }
+        val alpha = if (hidden) 0f else 1f
+        root.alpha = alpha
+        root.isVisible = visible && !hidden
+        webView?.alpha = alpha
+        webView?.visibility = if (hidden) View.INVISIBLE else View.VISIBLE
         if (nativeCardPassThroughActive != nativeCardPassThrough) {
             nativeCardPassThroughActive = nativeCardPassThrough
             Log.w(
