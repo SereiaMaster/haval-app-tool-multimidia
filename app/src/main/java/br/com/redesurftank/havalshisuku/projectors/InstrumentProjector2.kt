@@ -92,6 +92,7 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
     private var projectorWarmupBypassUntilMs = 0L
     private var projectionBypassRestoreScheduledUntilMs = 0L
     private var nativeCardPassThroughActive: Boolean? = null
+    private var projectorWindowHidden: Boolean? = null
 
     private fun isWarningValueActive(value: String?): Boolean {
         return ClusterWarningPolicy.isWarningValueActive(value)
@@ -483,6 +484,10 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
         root.isVisible = visible && !hidden
         webView?.alpha = alpha
         webView?.visibility = if (hidden) View.INVISIBLE else View.VISIBLE
+        // Drop the whole Presentation window (not just the views) so nothing we own
+        // paints over the native cluster on card 0 — no black window background and
+        // no theme mask border are left behind in the circular region.
+        applyProjectorWindowHidden(hidden)
         if (nativeCardPassThroughActive != nativeCardPassThrough) {
             nativeCardPassThroughActive = nativeCardPassThrough
             Log.w(
@@ -490,6 +495,17 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
                     "Native card pass-through active=$nativeCardPassThrough currentCard=$currentCard warningActive=$isWarningActive projectionActive=$projectionActive"
             )
         }
+    }
+
+    private fun applyProjectorWindowHidden(hidden: Boolean) {
+        if (projectorWindowHidden == hidden) return
+        projectorWindowHidden = hidden
+        window?.let { win ->
+            val attrs = win.attributes
+            attrs.alpha = if (hidden) 0f else 1f
+            win.attributes = attrs
+        }
+        Log.w(TAG, "Projector window hidden=$hidden currentCard=$currentCard")
     }
 
     private fun isCachedProjectionActive(): Boolean {

@@ -25,8 +25,12 @@ internal object ClusterCardFlowPolicy {
             warningActive: Boolean,
             projectionActive: Boolean
     ): Boolean {
-        // Card 0 is a neutral cluster state; hiding the Presentation drops the active theme.
-        return false
+        // Card 0 is the car's own navigable cluster region. Drop our Presentation
+        // entirely here so the native cluster (or the projection app on D3) shows
+        // through with zero paint from us. This is unconditional: projection state
+        // and warnings do not matter on card 0 — the user explicitly wants the
+        // circular region 100% released whenever card 0 is active.
+        return cardId == ClusterCardIds.NATIVE_CARD
     }
 
     fun decideCardChange(
