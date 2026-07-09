@@ -44,15 +44,19 @@ public class AcControlScreen implements Screen {
                 switch (steeringWheelAcControlType) {
                     case TEMPERATURE: {
                         var temperatureKey = CarConstants.CAR_HVAC_DRIVER_TEMPERATURE.getValue();
-                        var currentTemperature = serviceManager.getUpdatedData(temperatureKey);
-                        var readSource = "fresh";
+                        // Le do cache primeiro: getUpdatedData faz um IPC sincrono (bloqueante)
+                        // ao control service a cada tecla, o que deixa o ajuste pelo cluster lento.
+                        // O cache e mantido atualizado pelos listeners e pela escrita otimista,
+                        // entao reflete o valor atual sem bloquear o input.
+                        var currentTemperature = serviceManager.getData(temperatureKey);
+                        var readSource = "cache";
                         Float parsedTemperature = parseTemperature(currentTemperature);
                         if (parsedTemperature == null) {
-                            var cachedTemperature = serviceManager.getData(temperatureKey);
-                            parsedTemperature = parseTemperature(cachedTemperature);
+                            var freshTemperature = serviceManager.getUpdatedData(temperatureKey);
+                            parsedTemperature = parseTemperature(freshTemperature);
                             if (parsedTemperature != null) {
-                                currentTemperature = cachedTemperature;
-                                readSource = "cache";
+                                currentTemperature = freshTemperature;
+                                readSource = "fresh";
                             }
                         }
                         if (parsedTemperature == null) {
@@ -88,7 +92,12 @@ public class AcControlScreen implements Screen {
                     }
                     break;
                     case FAN_SPEED: {
-                        var currentFanSpeed = serviceManager.getUpdatedData(CarConstants.CAR_HVAC_FAN_SPEED.getValue());
+                        // Le do cache primeiro para nao bloquear o input com IPC sincrono.
+                        var fanKey = CarConstants.CAR_HVAC_FAN_SPEED.getValue();
+                        var currentFanSpeed = serviceManager.getData(fanKey);
+                        if (currentFanSpeed == null) {
+                            currentFanSpeed = serviceManager.getUpdatedData(fanKey);
+                        }
                         if (currentFanSpeed != null) {
                             int speed = Integer.parseInt(currentFanSpeed);
                             if (key == Key.UP) {
@@ -105,7 +114,11 @@ public class AcControlScreen implements Screen {
                                 speed = 1;
                             }
 
-                            boolean powerMode = serviceManager.getUpdatedData(CarConstants.CAR_HVAC_POWER_MODE.getValue()).equals("1");
+                            var powerModeValue = serviceManager.getData(CarConstants.CAR_HVAC_POWER_MODE.getValue());
+                            if (powerModeValue == null) {
+                                powerModeValue = serviceManager.getUpdatedData(CarConstants.CAR_HVAC_POWER_MODE.getValue());
+                            }
+                            boolean powerMode = "1".equals(powerModeValue);
                             if (speed == 0) {
                                 serviceManager.updateData(CarConstants.CAR_HVAC_POWER_MODE.getValue(), "0");
                             } else if (!powerMode) {

@@ -471,10 +471,12 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
     ) {
         if (!::root.isInitialized) return
 
-        // Comportamento do fork: o projector nunca esconde a Presentation por causa do card.
-        // O card nativo (0) fica transparente pelo proprio HTML do tema. Esconder aqui
-        // derrubava o tema e causava o "circulo preto" no card 0.
-        val nativeCardPassThrough = false
+        val nativeCardPassThrough =
+                ClusterCardFlowPolicy.shouldUseNativeCardPassThrough(
+                        currentCard,
+                        isWarningActive,
+                        projectionActive
+                )
         val hidden = bypassActive || nativeCardPassThrough
         val alpha = if (hidden) 0f else 1f
         root.alpha = alpha
@@ -752,20 +754,30 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
 
         val snapshot = readProjectionSnapshotForCardChange()
         val projectionStateMayBeStale = isProjectionStateMayBeStale(snapshot)
+        val hasManagedSecondaryDisplayWork = hasManagedSecondaryDisplayWork()
+        val cardCanAffectManagedAppBounds =
+                ClusterCardFlowPolicy.cardCanAffectManagedAppBounds(previousCard, nextCard)
+        val decision =
+                ClusterCardFlowPolicy.decideCardChange(
+                        nextCard = nextCard,
+                        projectionActive = snapshot.active,
+                        projectionStateMayBeStale = projectionStateMayBeStale,
+                        hasManagedSecondaryDisplayWork = hasManagedSecondaryDisplayWork,
+                        cardCanAffectManagedAppBounds = cardCanAffectManagedAppBounds
+                )
 
-        // Comportamento do fork: em toda troca de card o app apenas espelha o carro e
-        // atualiza tudo incondicionalmente (sem filtros de decisao). O push de estado de
-        // projecao (AA/CarPlay) e mantido para nao regredir a estabilidade daquele fluxo.
-        lastAppliedConfigs.clear()
+        if (decision.clearAppliedAppConfigCache) {
+            lastAppliedConfigs.clear()
+        }
 
-        if (snapshot.active || projectionStateMayBeStale) {
+        if (decision.pushProjectionStateBeforeCard) {
             // During projection, projection classes must reach JS before
             // cardId to avoid a one-frame opaque AC/main menu repaint.
             pushProjectionStateToWebView(
                     snapshot.carPlayInDash,
                     snapshot.projectionMirrorInDash,
                     snapshot.projectionPreparingD3,
-                    force = snapshot.active
+                    force = decision.forceProjectionStateBeforeCard
             )
         }
 
@@ -777,27 +789,34 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
 
         evaluateJsIfReady(webView, "control('cardId', $currentCard)")
 
-        updateVirtualClusterVisibility(
-                snapshot.carPlayInDash,
-                snapshot.projectionMirrorInDash,
-                "CLUSTER_CARD_CHANGED",
-                snapshot.projectionPreparingD3
-        )
+        if (decision.updateVirtualClusterVisibility) {
+            updateVirtualClusterVisibility(
+                    snapshot.carPlayInDash,
+                    snapshot.projectionMirrorInDash,
+                    "CLUSTER_CARD_CHANGED",
+                    snapshot.projectionPreparingD3
+            )
+        }
 
-        syncSecondaryDisplayApps(3)
+        if (decision.syncSecondaryDisplayApps) {
+            syncSecondaryDisplayApps(3)
+        }
 
         MainUiManager.getInstance().handleCardChange(currentCard)
-        if (currentCard == ClusterCardIds.MAIN_MENU_CARD || currentCard == ClusterCardIds.AIRCON_CARD) {
+        if (ClusterCardFlowPolicy.isCardBackedMenu(currentCard)) {
             isWarningDismissed = false
+        }
+        if (decision.syncVisibleCardValues) {
             updateCardEntryValuesWebView(currentCard)
         }
 
         val elapsedMs = SystemClock.uptimeMillis() - startedAt
-        if (elapsedMs > 80L || !snapshot.usedFastPath) {
+        if (elapsedMs > 80L || !snapshot.usedFastPath || decision.updateVirtualClusterVisibility) {
             Log.w(
                     TAG,
                     "[CARD_FLOW] card=$previousCard->$currentCard elapsedMs=$elapsedMs fastPath=${snapshot.usedFastPath} " +
-                            "projectionActive=${snapshot.active} projectionStale=$projectionStateMayBeStale"
+                            "projectionActive=${snapshot.active} projectionStale=$projectionStateMayBeStale " +
+                            "managedSecondary=$hasManagedSecondaryDisplayWork boundsMayChange=$cardCanAffectManagedAppBounds decision=$decision"
             )
         }
         logClusterPerfEvent(
@@ -808,7 +827,11 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
                         "elapsedMs" to elapsedMs,
                         "fastPath" to snapshot.usedFastPath,
                         "projectionActive" to snapshot.active,
-                        "projectionStale" to projectionStateMayBeStale
+                        "projectionStale" to projectionStateMayBeStale,
+                        "managedSecondary" to hasManagedSecondaryDisplayWork,
+                        "boundsMayChange" to cardCanAffectManagedAppBounds,
+                        "visibilityWork" to decision.updateVirtualClusterVisibility,
+                        "syncApps" to decision.syncSecondaryDisplayApps
                 )
         )
     }
@@ -2153,7 +2176,13 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
                     "js_card_update",
                     mapOf("from" to previousCard, "to" to cardId)
             )
-            if (previousCard != cardId && hasManagedSecondaryDisplayWork(3)) {
+            if (
+                    hasManagedSecondaryDisplayWork(3) &&
+                            ClusterCardFlowPolicy.cardCanAffectManagedAppBounds(
+                                    previousCard,
+                                    cardId
+                            )
+            ) {
                 lastAppliedConfigs.clear()
                 syncSecondaryDisplayApps(3)
             }

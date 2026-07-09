@@ -41,8 +41,8 @@ public class App extends Application {
         CarMockManager.ensureEnabledForEmulator(this);
 
         // Semeia os temas embutidos (Basic / Basic Light / Sport) para ficarem selecionaveis
-        // offline. O tema padrao continua sendo o embutido (tema original do carro), igual a
-        // como era quando o projeto foi forkado; o usuario pode escolher outro tema pela UI.
+        // offline. O tema padrao continua sendo o embutido do upstream (esportivo); o usuario
+        // pode escolher outro tema (Basic / Basic Light) pela UI.
         new Thread(() -> {
             try {
                 br.com.redesurftank.havalshisuku.managers.ThemeManager.Companion
