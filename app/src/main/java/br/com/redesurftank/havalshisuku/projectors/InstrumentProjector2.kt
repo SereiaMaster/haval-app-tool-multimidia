@@ -194,9 +194,6 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
                                                 .key,
                                         SharedPreferencesKeys.ENABLE_INSTRUMENT_PROJECTOR.key,
                                         SharedPreferencesKeys.ENABLE_VIRTUAL_CLUSTER.key,
-                                        SharedPreferencesKeys
-                                                .VIRTUAL_CLUSTER_THEME_ONLY_ON_PROJECTION
-                                                .key,
                                         SharedPreferencesKeys.VIRTUAL_CLUSTER_DISPLAY_ID.key,
                                         SharedPreferencesKeys.ACTIVE_CUSTOM_THEME.key,
                                         SharedPreferencesKeys.VIRTUAL_CLUSTER_THEME.key,
@@ -480,31 +477,12 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
                         isWarningActive,
                         projectionActive
                 )
-        // Opcao "tema apenas durante projecao": quando ligada, o overlay do tema so
-        // aparece enquanto ha projecao ativa no D3 (AA/CarPlay/mapa). Sem projecao,
-        // escondemos tudo para exibir o cluster nativo. Avisos ainda mantem o overlay.
-        val hideForProjectionOnlyTheme =
-                preferences.getBoolean(
-                        SharedPreferencesKeys.VIRTUAL_CLUSTER_THEME_ONLY_ON_PROJECTION.key,
-                        false
-                ) && !projectionActive && !isWarningActive
-        val hidden = bypassActive || nativeCardPassThrough || hideForProjectionOnlyTheme
+        val hidden = bypassActive || nativeCardPassThrough
         val alpha = if (hidden) 0f else 1f
         root.alpha = alpha
         root.isVisible = visible && !hidden
         webView?.alpha = alpha
         webView?.visibility = if (hidden) View.INVISIBLE else View.VISIBLE
-        // Zera o alpha da JANELA inteira quando escondido. Esconder apenas root/webView
-        // pode deixar a superficie da Presentation ainda pintando a "bola preta" sobre
-        // o velocimetro circular do cluster nativo; tornar a janela transparente
-        // garante que nenhum overlay sobra naquele trecho.
-        window?.let { win ->
-            if (win.attributes.alpha != alpha) {
-                val attrs = win.attributes
-                attrs.alpha = alpha
-                win.attributes = attrs
-            }
-        }
         if (nativeCardPassThroughActive != nativeCardPassThrough) {
             nativeCardPassThroughActive = nativeCardPassThrough
             Log.w(

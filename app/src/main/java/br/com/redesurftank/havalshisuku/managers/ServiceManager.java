@@ -260,10 +260,7 @@ public class ServiceManager {
     private boolean isClusterHeartbeatRunning = false;
     private int clusterHeartBeatCount = 0;
     private int clusterCardView = 0;
-    private static final int NATIVE_CLUSTER_CARD = 0;
-    // Cards do cluster projetado navegaveis via toque curto (exclui o 0 = cluster nativo do carro).
-    private static final int[] PROJECTED_CLUSTER_CARDS = new int[] {1, 3};
-    private int lastProjectedClusterCard = 1;
+    private static final int[] CLUSTER_CARD_SEQUENCE = new int[] {0, 1, 3};
     private long lastClusterInputAtMs = 0L;
     private int lastClusterInputKeyCode = -1;
     private String lastClusterInputKeyName = "";
@@ -628,9 +625,8 @@ public class ServiceManager {
                         }
                     }
                     if (sharedPreferences.getBoolean(SharedPreferencesKeys.ENABLE_CUSTOM_MENU.getKey(), false)) {
-                        int keyCode = keyEvent.getKeyCode();
                         Screen.Key key = null;
-                        switch (keyCode) {
+                        switch (keyEvent.getKeyCode()) {
                             case 1024:
                                 key = Screen.Key.UP;
                                 break;
@@ -665,18 +661,10 @@ public class ServiceManager {
                                 key = Screen.Key.BACK_LONG;
                                 break;
                         }
-                        // Toque longo nos lados (LEFT_LONG=1035 / RIGHT_LONG=1036) ativa o cluster
-                        // projetado. O enum Screen.Key nao tem esses valores, entao tratamos pelo
-                        // keycode (segue o padrao +9 do hardware: 1026->1035, 1027->1036).
-                        boolean leftLong = keyCode == 1035;
-                        boolean rightLong = keyCode == 1036;
-                        String keyName = key != null
-                                ? key.name()
-                                : (leftLong ? "LEFT_LONG" : rightLong ? "RIGHT_LONG" : null);
-                        if (key != null || leftLong || rightLong) {
+                        if (key != null) {
                             lastClusterInputAtMs = SystemClock.uptimeMillis();
-                            lastClusterInputKeyCode = keyCode;
-                            lastClusterInputKeyName = keyName;
+                            lastClusterInputKeyCode = keyEvent.getKeyCode();
+                            lastClusterInputKeyName = key.name();
                             Log.w(
                                     TAG,
                                     "Cluster input key: "
@@ -701,21 +689,13 @@ public class ServiceManager {
                             );
                             long now = SystemClock.uptimeMillis();
                             boolean duplicateClusterInput =
-                                    lastHandledClusterInputKeyCode == keyCode
+                                    lastHandledClusterInputKeyCode == keyEvent.getKeyCode()
                                             && now - lastHandledClusterInputAtMs <= CLUSTER_INPUT_DEDUP_WINDOW_MS;
                             if (!duplicateClusterInput) {
-                                lastHandledClusterInputKeyCode = keyCode;
+                                lastHandledClusterInputKeyCode = keyEvent.getKeyCode();
                                 lastHandledClusterInputAtMs = now;
-                                if (leftLong || rightLong) {
-                                    // Toque longo lateral: ativa/entra no cluster projetado.
-                                    activateProjectedCluster();
-                                } else if (key == Screen.Key.LEFT || key == Screen.Key.RIGHT) {
-                                    // Toque curto: navega apenas entre os cards projetados.
+                                if (key == Screen.Key.LEFT || key == Screen.Key.RIGHT) {
                                     handleClusterCardNavigationKey(key);
-                                } else if (key == Screen.Key.BACK_LONG
-                                        && isProjectedClusterCard(clusterCardView)) {
-                                    // Toque longo em voltar: some com o projetado e volta ao nativo.
-                                    deactivateProjectedCluster();
                                 } else {
                                     MainUiManager.getInstance().handleGeneralKeyEvents(key);
                                     if (key == Screen.Key.BACK) {
@@ -1222,71 +1202,52 @@ public class ServiceManager {
         Log.w(TAG, label + " state changed to: " + !enabled);
     }
 
-    // Toque curto lateral: no cluster nativo (0) NAO faz nada (exige toque longo para
-    // ativar o projetado); estando no projetado, cicla apenas entre os cards {1,3}.
     private void handleClusterCardNavigationKey(Screen.Key key) {
-        if (clusterCardView == NATIVE_CLUSTER_CARD) {
-            Log.w(TAG, "Short cluster nav ignored on native card; long-press left/right to activate projected cluster");
-            return;
+        int currentCard = clusterCardView;
+        if (!isKnownClusterCard(currentCard)) {
+            currentCard = MainUiManager.getInstance().getCurrentCard();
         }
-        navigateProjectedCards(key);
-    }
+        if (!isKnownClusterCard(currentCard)) {
+            currentCard = 0;
+        }
 
-    private void navigateProjectedCards(Screen.Key key) {
-        int currentIndex = indexOfProjectedCard(clusterCardView);
-        if (currentIndex < 0) {
-            currentIndex = indexOfProjectedCard(lastProjectedClusterCard);
-            if (currentIndex < 0) currentIndex = 0;
-        }
+        int currentIndex = indexOfClusterCard(currentCard);
         int direction = key == Screen.Key.RIGHT ? 1 : -1;
-        int nextIndex = (currentIndex + direction + PROJECTED_CLUSTER_CARDS.length) % PROJECTED_CLUSTER_CARDS.length;
-        setSyntheticClusterCard(PROJECTED_CLUSTER_CARDS[nextIndex], "projected_nav key=" + key);
-    }
-
-    // Toque longo lateral: ativa o cluster projetado. Se ja estiver projetado, mantem o
-    // card atual (a navegacao fica por conta do toque curto).
-    private void activateProjectedCluster() {
-        if (isProjectedClusterCard(clusterCardView)) {
-            Log.w(TAG, "Projected cluster already active on card " + clusterCardView);
-            return;
-        }
-        int target = isProjectedClusterCard(lastProjectedClusterCard)
-                ? lastProjectedClusterCard
-                : PROJECTED_CLUSTER_CARDS[0];
-        setSyntheticClusterCard(target, "activate_projected");
-    }
-
-    // Toque longo em voltar: some com o projetado e revela o cluster nativo do carro.
-    private void deactivateProjectedCluster() {
-        if (isProjectedClusterCard(clusterCardView)) {
-            lastProjectedClusterCard = clusterCardView;
-        }
-        setSyntheticClusterCard(NATIVE_CLUSTER_CARD, "deactivate_projected_back_long");
-    }
-
-    private void setSyntheticClusterCard(int nextCard, String reason) {
+        int nextIndex = (currentIndex + direction + CLUSTER_CARD_SEQUENCE.length) % CLUSTER_CARD_SEQUENCE.length;
+        int nextCard = CLUSTER_CARD_SEQUENCE[nextIndex];
         int previousCard = clusterCardView;
         clusterCardView = nextCard;
-        if (isProjectedClusterCard(nextCard)) {
-            lastProjectedClusterCard = nextCard;
-        }
         lastSyntheticClusterCardNavigationAtMs = SystemClock.uptimeMillis();
         lastSyntheticClusterCardTarget = nextCard;
-        Log.w(TAG, "Synthetic cluster card set: " + previousCard + " -> " + nextCard + " reason=" + reason);
+
+        Log.w(
+                TAG,
+                "Synthetic cluster card navigation: "
+                        + currentCard
+                        + " -> "
+                        + nextCard
+                        + " key="
+                        + key
+                        + " previousServiceCard="
+                        + previousCard
+        );
         logPersistentClusterEvent(
                 "synthetic_cluster_card_navigation",
-                "from=" + previousCard + " to=" + nextCard + " reason=" + reason
+                "from=" + currentCard
+                        + " to=" + nextCard
+                        + " key=" + key
+                        + " previousServiceCard=" + previousCard
         );
         dispatchServiceManagerEvent(ServiceManagerEventType.CLUSTER_CARD_CHANGED, clusterCardView);
     }
 
-    private boolean isProjectedClusterCard(int card) {
-        return indexOfProjectedCard(card) >= 0;
+    private boolean isKnownClusterCard(int card) {
+        return indexOfClusterCard(card) >= 0;
     }
 
-    private int indexOfProjectedCard(int card) {
-        for (int i = 0; i < PROJECTED_CLUSTER_CARDS.length; i++) {
-            if (PROJECTED_CLUSTER_CARDS[i] == card) {
+    private int indexOfClusterCard(int card) {
+        for (int i = 0; i < CLUSTER_CARD_SEQUENCE.length; i++) {
+            if (CLUSTER_CARD_SEQUENCE[i] == card) {
                 return i;
             }
         }

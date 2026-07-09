@@ -88,19 +88,16 @@ class ClusterCardFlowPolicyTest {
     }
 
     @Test
-    fun nativeCardRevealsNativeClusterWhenNoProjection() {
-        assertTrue(
+    fun nativeCardPassThroughIsDisabledToPreserveTheme() {
+        assertFalse(
                 ClusterCardFlowPolicy.shouldUseNativeCardPassThrough(
                         cardId = ClusterCardIds.NATIVE_CARD,
                         warningActive = false,
                         projectionActive = false
                 )
         )
-    }
 
-    @Test
-    fun nativeCardPassesThroughUnconditionallyDuringProjection() {
-        assertTrue(
+        assertFalse(
                 ClusterCardFlowPolicy.shouldUseNativeCardPassThrough(
                         cardId = ClusterCardIds.NATIVE_CARD,
                         warningActive = false,
@@ -110,22 +107,11 @@ class ClusterCardFlowPolicyTest {
     }
 
     @Test
-    fun nativeCardPassesThroughUnconditionallyDuringWarnings() {
-        assertTrue(
+    fun nativeCardPassThroughIsDisabledDuringWarnings() {
+        assertFalse(
                 ClusterCardFlowPolicy.shouldUseNativeCardPassThrough(
                         cardId = ClusterCardIds.NATIVE_CARD,
                         warningActive = true,
-                        projectionActive = true
-                )
-        )
-    }
-
-    @Test
-    fun nonNativeCardsNeverPassThrough() {
-        assertFalse(
-                ClusterCardFlowPolicy.shouldUseNativeCardPassThrough(
-                        cardId = ClusterCardIds.AIRCON_CARD,
-                        warningActive = false,
                         projectionActive = false
                 )
         )
