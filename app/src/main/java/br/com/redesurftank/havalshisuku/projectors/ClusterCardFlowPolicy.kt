@@ -25,12 +25,13 @@ internal object ClusterCardFlowPolicy {
             warningActive: Boolean,
             projectionActive: Boolean
     ): Boolean {
-        // No card nativo (0) escondemos a Presentation do tema para revelar o cluster
-        // original do carro. So fazemos isso quando NAO ha projecao ativa no D3
-        // (AA/CarPlay/mapa): havendo projecao, mantemos o tema sobreposto por cima dela.
-        // Tambem nao passamos direto enquanto ha aviso ativo, que precisa aparecer sobre
-        // o cluster.
-        return cardId == ClusterCardIds.NATIVE_CARD && !projectionActive && !warningActive
+        // No card nativo (0) o usuario desativou o cluster projetado (toque longo em
+        // voltar) e quer o cluster original do carro de volta. Nesse card o overlay
+        // deve ser interrompido 100%, INDEPENDENTE de qualquer condicao (projecao no
+        // D3 ou aviso ativo): o proprio cluster nativo lida com seus avisos e a
+        // projecao ja ocupa o display. O tema sobreposto so faz sentido nos cards
+        // projetados (1/3), que nunca passam direto por aqui.
+        return cardId == ClusterCardIds.NATIVE_CARD
     }
 
     fun decideCardChange(

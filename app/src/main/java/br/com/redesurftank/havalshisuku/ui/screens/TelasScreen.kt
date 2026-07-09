@@ -346,6 +346,14 @@ fun TelasTab() {
                 prefs.getString(SharedPreferencesKeys.DEFAULT_DISPLAY_APP_PACKAGE.key, "") ?: ""
         )
     }
+    var themeOnlyOnProjection by remember {
+        mutableStateOf(
+                prefs.getBoolean(
+                        SharedPreferencesKeys.VIRTUAL_CLUSTER_THEME_ONLY_ON_PROJECTION.key,
+                        false
+                )
+        )
+    }
     var appExpanded by remember { mutableStateOf(false) }
     var themeExpanded by remember { mutableStateOf(false) }
     var configs by remember { mutableStateOf(DisplayAppLauncher.getAllConfigs()) }
@@ -556,6 +564,47 @@ fun TelasTab() {
                 }
 
                 if (enableMask) {
+                    HorizontalDivider(color = Color(0xFF2C3139))
+
+                    Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                    "Tema apenas durante projeção",
+                                    color = Color.White,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                    "Aplica o tema somente quando há projeção (AA/CarPlay/mapa) no D3. Sem projeção, exibe o cluster nativo do carro.",
+                                    color = Color(0xFFB0B8C4),
+                                    fontSize = 13.sp
+                            )
+                        }
+                        Switch(
+                                checked = themeOnlyOnProjection,
+                                enabled = allClusterFunctionsEnabled,
+                                onCheckedChange = { checked ->
+                                    themeOnlyOnProjection = checked
+                                    prefs.edit {
+                                        putBoolean(
+                                                SharedPreferencesKeys
+                                                        .VIRTUAL_CLUSTER_THEME_ONLY_ON_PROJECTION
+                                                        .key,
+                                                checked
+                                        )
+                                    }
+                                },
+                                colors =
+                                        SwitchDefaults.colors(
+                                                checkedThumbColor = Color.White,
+                                                checkedTrackColor = Color(0xFF4A9EFF)
+                                        )
+                        )
+                    }
+
                     HorizontalDivider(color = Color(0xFF2C3139))
 
                     // Theme Selector - Horizontal compact carousel

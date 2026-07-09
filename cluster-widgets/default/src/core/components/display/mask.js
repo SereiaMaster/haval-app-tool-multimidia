@@ -32,6 +32,31 @@ export function createMask() {
     maskBg.appendChild(partialAppMask);
     maskBg.appendChild(warnMask);
 
+    // Após o fade-out do no-app-mask-r (600ms = duração da transição no CSS),
+    // aplicamos display:none para remover qualquer paint residual do círculo/halo.
+    // Ao reexibir, restauramos o display antes do fade-in.
+    let hideMaskRTimer = null;
+    const applyNoAppMaskR = (showR) => {
+        if (hideMaskRTimer) {
+            clearTimeout(hideMaskRTimer);
+            hideMaskRTimer = null;
+        }
+        if (showR) {
+            noAppMaskR.style.display = '';
+            // Força reflow para o fade-in ocorrer a partir de opacity 0.
+            void noAppMaskR.offsetWidth;
+            noAppMaskR.style.opacity = '1';
+            noAppMaskR.style.visibility = 'visible';
+        } else {
+            noAppMaskR.style.opacity = '0';
+            noAppMaskR.style.visibility = 'hidden';
+            hideMaskRTimer = setTimeout(() => {
+                hideMaskRTimer = null;
+                noAppMaskR.style.display = 'none';
+            }, 600);
+        }
+    };
+
     const updateVisibility = () => {
         const appInDash = get('appInDash');
         const carPlayInDash = get('carPlayInDash');
@@ -69,9 +94,8 @@ export function createMask() {
         }
 
         noAppMaskL.style.opacity = showL ? '1' : '0';
-        noAppMaskR.style.opacity = showR ? '1' : '0';
         noAppMaskL.style.visibility = showL ? 'visible' : 'hidden';
-        noAppMaskR.style.visibility = showR ? 'visible' : 'hidden';
+        applyNoAppMaskR(showR);
 
         partialAppMask.style.opacity = '0'; // Removed for better experience. Will decide if we keep this mask in future.
         partialAppMask.style.visibility = 'hidden';
@@ -94,6 +118,10 @@ export function createMask() {
         noAppR: noAppMaskR,
         partial: partialAppMask,
         cleanup: () => {
+            if (hideMaskRTimer) {
+                clearTimeout(hideMaskRTimer);
+                hideMaskRTimer = null;
+            }
             unsub1();
             unsub2();
             unsub3();

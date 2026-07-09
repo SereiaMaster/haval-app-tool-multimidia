@@ -2377,6 +2377,13 @@ canvas.graph-chart {
   pointer-events: none !important;
 }
 
+/* Sem tema aplicado (Painel Virtual off): o no-app-mask-r continua recortando o
+   mostrador, mas o box-shadow escuro vaza sobre o cluster nativo. Removemos apenas
+   a sombra, mantendo o mask. */
+.cluster-disabled .no-app-mask-r {
+  box-shadow: none !important;
+}
+
 /* Warning Mode & Card 0 Mode */
 .warn-is-active .dashboard-menu-container,
 .warn-is-active .mask-circle.right,

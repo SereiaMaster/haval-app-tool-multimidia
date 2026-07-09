@@ -99,8 +99,8 @@ class ClusterCardFlowPolicyTest {
     }
 
     @Test
-    fun nativeCardKeepsThemeOverlayDuringProjection() {
-        assertFalse(
+    fun nativeCardPassesThroughUnconditionallyDuringProjection() {
+        assertTrue(
                 ClusterCardFlowPolicy.shouldUseNativeCardPassThrough(
                         cardId = ClusterCardIds.NATIVE_CARD,
                         warningActive = false,
@@ -110,12 +110,12 @@ class ClusterCardFlowPolicyTest {
     }
 
     @Test
-    fun nativeCardPassThroughIsDisabledDuringWarnings() {
-        assertFalse(
+    fun nativeCardPassesThroughUnconditionallyDuringWarnings() {
+        assertTrue(
                 ClusterCardFlowPolicy.shouldUseNativeCardPassThrough(
                         cardId = ClusterCardIds.NATIVE_CARD,
                         warningActive = true,
-                        projectionActive = false
+                        projectionActive = true
                 )
         )
     }
