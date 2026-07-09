@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.ApplicationInfo
 import android.graphics.Color
+import android.graphics.Rect
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
@@ -483,12 +484,45 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
         root.isVisible = visible && !hidden
         webView?.alpha = alpha
         webView?.visibility = if (hidden) View.INVISIBLE else View.VISIBLE
+        applyNativeCardRightCutout(hidden)
         if (nativeCardPassThroughActive != nativeCardPassThrough) {
             nativeCardPassThroughActive = nativeCardPassThrough
             Log.w(
                     TAG,
                     "Native card pass-through active=$nativeCardPassThrough currentCard=$currentCard warningActive=$isWarningActive projectionActive=$projectionActive"
             )
+        }
+    }
+
+    /**
+     * On the native card (0) the right circle is the car's original navigable cluster.
+     * Clip the WebView so it only paints the left region; the right side becomes
+     * transparent and the layer below (native cluster, or projection app) shows through.
+     * This is a plain rectangular ("square") cut and is theme-agnostic: it works for any
+     * theme rendered in the WebView, including user-installed ones. On other cards the clip
+     * is cleared so the full theme is shown again.
+     */
+    private fun applyNativeCardRightCutout(hidden: Boolean) {
+        val wv = webView ?: return
+        val clipToLeft = currentCard == ClusterCardIds.NATIVE_CARD && !hidden
+        if (!clipToLeft) {
+            if (wv.clipBounds != null) wv.clipBounds = null
+            return
+        }
+        var w = wv.width
+        var h = wv.height
+        if (w <= 0 || h <= 0) {
+            // Not laid out yet; retry once layout has real dimensions.
+            wv.post { applyNativeCardRightCutout(hidden) }
+            return
+        }
+        // Keep the left 70% (matches the app's own right-region convention); reveal the
+        // right ~30% where the native right gauge lives.
+        val keepFraction = 0.7f
+        val keepWidth = (w * keepFraction).toInt().coerceIn(1, w)
+        val target = Rect(0, 0, keepWidth, h)
+        if (wv.clipBounds != target) {
+            wv.clipBounds = target
         }
     }
 
