@@ -145,6 +145,7 @@ public class ServiceManager {
             CarConstants.CAR_BASIC_MAINTENANCE_WARNING,
             CarConstants.CAR_BASIC_OIL_LOW_WARNING,
             CarConstants.CAR_BASIC_SEAT_BELT_WARNING,
+            CarConstants.CAR_CONFIGURE_SEAT_BELT_WARNING,
             CarConstants.CAR_BASIC_TIREPRESS_WARNING,
             CarConstants.CAR_BASIC_TIRETEMP_WARNING,
             CarConstants.CAR_BASIC_TPMS_WARNING,
@@ -1880,6 +1881,16 @@ public class ServiceManager {
                 if (isForceDisableAVAS) {
                     setAvasEnabled(false);
                     Log.w(TAG, "AVAS disabled by user preference");
+                }
+            }
+            if (key.equals(CarConstants.CAR_BASIC_SEAT_BELT_WARNING.getValue())
+                    && value != null && !value.isEmpty() && !value.equals("0")) {
+                // Gatilho de runtime: quando o carro dispara o aviso de cinto, desligamos o
+                // aviso na hora (se a flag estiver ativa) para calar o alarme assim que ele ativa,
+                // sem depender apenas do toggle de configuracao.
+                if (sharedPreferences.getBoolean(SharedPreferencesKeys.DISABLE_SEAT_BELT_WARNING.getKey(), false)) {
+                    setSeatBeltWarningEnabled(false);
+                    Log.w(TAG, "Seat belt runtime warning active (value=" + value + "); disabling by user preference");
                 }
             }
             if (key.equals(CarConstants.CAR_CONFIGURE_SEAT_BELT_WARNING.getValue()) && value.equals("1")) {
