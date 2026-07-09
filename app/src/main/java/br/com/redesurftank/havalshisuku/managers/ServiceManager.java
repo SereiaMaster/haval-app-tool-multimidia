@@ -258,8 +258,6 @@ public class ServiceManager {
     private ServiceConnection inputServiceConnection;
     private IConnectivityManager connectivityManager;
     private boolean isClusterHeartbeatRunning = false;
-    private volatile boolean clusterHeartbeatPaused = false;
-    private volatile boolean clusterNativeCardActive = false;
     private int clusterHeartBeatCount = 0;
     private int clusterCardView = 0;
     private static final int[] CLUSTER_CARD_SEQUENCE = new int[] {0, 1, 3};
@@ -531,7 +529,6 @@ public class ServiceManager {
                             return;
                         }
                         clusterCardView = whichCard;
-                        onClusterCardResolved(clusterCardView);
                         dispatchServiceManagerEvent(ServiceManagerEventType.CLUSTER_CARD_CHANGED, clusterCardView);
                         Log.w(
                                 TAG,
@@ -1220,7 +1217,6 @@ public class ServiceManager {
         int nextCard = CLUSTER_CARD_SEQUENCE[nextIndex];
         int previousCard = clusterCardView;
         clusterCardView = nextCard;
-        onClusterCardResolved(clusterCardView);
         lastSyntheticClusterCardNavigationAtMs = SystemClock.uptimeMillis();
         lastSyntheticClusterCardTarget = nextCard;
 
@@ -1421,28 +1417,15 @@ public class ServiceManager {
         }
     }
 
-    private void sendAndroidNotReadyToCluster() {
-        try {
-            if (clusterService == null) return;
-            ClusterMsgData msg = new ClusterMsgData();
-            msg.setIntValue(0);
-            clusterService.setMsg(75, msg);
-        } catch (Exception e) {
-            Log.e(TAG, "Error releasing cluster service message", e);
-        }
-    }
-
     public synchronized void startClusterHeartbeat() {
         if (isClusterHeartbeatRunning)
             return;
-        clusterHeartbeatPaused = false;
         isClusterHeartbeatRunning = true;
         sendAndroidReadyToCluster();
         backgroundHandler.postDelayed(new Runnable() {
             @Override
             public void run() {
-                if (clusterHeartbeatPaused
-                        || !sharedPreferences.getBoolean(SharedPreferencesKeys.ENABLE_INSTRUMENT_CUSTOM_MEDIA_INTEGRATION.getKey(), false)) {
+                if (!sharedPreferences.getBoolean(SharedPreferencesKeys.ENABLE_INSTRUMENT_CUSTOM_MEDIA_INTEGRATION.getKey(), false)) {
                     isClusterHeartbeatRunning = false;
                     return;
                 }
@@ -1451,34 +1434,6 @@ public class ServiceManager {
 
             }
         }, 1000);
-    }
-
-    /**
-     * Releases or reclaims the instrument cluster region based on the resolved card.
-     *
-     * On card 0 (the car's own navigable cluster) we mirror exactly what turning the
-     * "projeção do cluster" flag off does: stop the Android keep-alive heartbeat and
-     * tell the cluster service Android is no longer providing content, so the car
-     * reclaims its native navigable cluster in the circular region. When leaving card
-     * 0 we reclaim the region so the themed cards render again.
-     */
-    private void onClusterCardResolved(int card) {
-        boolean nativeCard = card == 0;
-        if (nativeCard == clusterNativeCardActive) return;
-        clusterNativeCardActive = nativeCard;
-        if (nativeCard) {
-            clusterHeartbeatPaused = true;
-            sendAndroidNotReadyToCluster();
-            Log.w(TAG, "Cluster native card active: released cluster to car (heartbeat paused)");
-        } else {
-            clusterHeartbeatPaused = false;
-            if (sharedPreferences.getBoolean(
-                    SharedPreferencesKeys.ENABLE_INSTRUMENT_CUSTOM_MEDIA_INTEGRATION.getKey(),
-                    false)) {
-                startClusterHeartbeat();
-            }
-            Log.w(TAG, "Cluster native card cleared: reclaimed cluster (heartbeat resumed)");
-        }
     }
 
     private void sendHeartBeatToCluster() {

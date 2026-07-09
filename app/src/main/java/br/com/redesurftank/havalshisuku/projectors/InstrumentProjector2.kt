@@ -92,7 +92,6 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
     private var projectorWarmupBypassUntilMs = 0L
     private var projectionBypassRestoreScheduledUntilMs = 0L
     private var nativeCardPassThroughActive: Boolean? = null
-    private var projectorWindowHidden: Boolean? = null
 
     private fun isWarningValueActive(value: String?): Boolean {
         return ClusterWarningPolicy.isWarningValueActive(value)
@@ -479,15 +478,24 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
                         projectionActive
                 )
         val hidden = bypassActive || nativeCardPassThrough
-        val alpha = if (hidden) 0f else 1f
-        root.alpha = alpha
-        root.isVisible = visible && !hidden
-        webView?.alpha = alpha
-        webView?.visibility = if (hidden) View.INVISIBLE else View.VISIBLE
-        // Drop the whole Presentation window (not just the views) so nothing we own
-        // paints over the native cluster on card 0 — no black window background and
-        // no theme mask border are left behind in the circular region.
-        applyProjectorWindowHidden(hidden)
+        if (nativeCardPassThrough && !bypassActive) {
+            // Card 0: the car's cluster compositor grabs this window's surface
+            // buffer directly (it ignores window alpha). We must NOT make the views
+            // INVISIBLE/GONE — that stops drawing and leaves the last opaque frame
+            // frozen (a mirror of the previous card). Instead keep the surface alive
+            // and DRAWING, but fully transparent (alpha 0), so the car keeps getting
+            // fresh transparent frames and the native cluster shows through live.
+            root.alpha = 0f
+            root.isVisible = visible
+            webView?.alpha = 0f
+            webView?.visibility = View.VISIBLE
+        } else {
+            val alpha = if (hidden) 0f else 1f
+            root.alpha = alpha
+            root.isVisible = visible && !hidden
+            webView?.alpha = alpha
+            webView?.visibility = if (hidden) View.INVISIBLE else View.VISIBLE
+        }
         if (nativeCardPassThroughActive != nativeCardPassThrough) {
             nativeCardPassThroughActive = nativeCardPassThrough
             Log.w(
@@ -495,17 +503,6 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
                     "Native card pass-through active=$nativeCardPassThrough currentCard=$currentCard warningActive=$isWarningActive projectionActive=$projectionActive"
             )
         }
-    }
-
-    private fun applyProjectorWindowHidden(hidden: Boolean) {
-        if (projectorWindowHidden == hidden) return
-        projectorWindowHidden = hidden
-        window?.let { win ->
-            val attrs = win.attributes
-            attrs.alpha = if (hidden) 0f else 1f
-            win.attributes = attrs
-        }
-        Log.w(TAG, "Projector window hidden=$hidden currentCard=$currentCard")
     }
 
     private fun isCachedProjectionActive(): Boolean {
