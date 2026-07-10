@@ -572,6 +572,16 @@ public class ServiceManager {
                                         + " sinceInputMs=" + sinceInputMs
                         );
                     } else if (msgId == 134) {
+                        if (clusterNativeCardActive) {
+                            // Modo nativo (cluster liberado ao carro): ignoramos o pedido do
+                            // carro (134==2) para o Android reassumir a superficie. Se
+                            // resumissemos o heartbeat aqui, o Android voltaria a compor o
+                            // cluster e a WebView sintetica reapareceria (bug "Voltar -> volta
+                            // pro sintetico"). Alem disso, esse religa/pausa do heartbeat deixa
+                            // os cards nativos que dependem de slot Android pretos. Somente o
+                            // toque longo lateral (activateProjectedCluster) reativa.
+                            return;
+                        }
                         if (sharedPreferences.getBoolean(SharedPreferencesKeys.ENABLE_INSTRUMENT_CUSTOM_MEDIA_INTEGRATION.getKey(), false)) {
                             if (data.getIntValue() == 2) {
                                 sendHeartBeatToCluster();
