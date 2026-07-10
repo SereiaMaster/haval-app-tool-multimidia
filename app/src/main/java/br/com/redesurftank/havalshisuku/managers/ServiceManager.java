@@ -1332,12 +1332,8 @@ public class ServiceManager {
         clusterNativeReleaseRunnable = () -> {
             clusterNativeReleaseRunnable = null;
             if (!clusterNativeCardActive) return;
-            // Apenas para o keep-alive (para de enviar setMsg 134), exatamente como o
-            // desligar-a-flag faz. NAO enviamos setMsg(75, 0): esse sinal de
-            // "android-not-ready" coloca o carro em estado de espera ("Carregando")
-            // ate um input nudge. Deixando o heartbeat expirar, o carro cai direto no
-            // cluster nativo.
             clusterHeartbeatPaused = true;
+            sendAndroidNotReadyToCluster();
             Log.w(TAG, "Cluster native card active: released cluster to car (heartbeat paused after fade)");
         };
         backgroundHandler.postDelayed(clusterNativeReleaseRunnable, NATIVE_CARD_HEARTBEAT_RELEASE_DELAY_MS);
@@ -1355,12 +1351,18 @@ public class ServiceManager {
             clusterNativeReleaseRunnable = null;
         }
         clusterHeartbeatPaused = false;
+        // Reanuncia android-ready (75=1) imediatamente. Nao dependemos apenas do
+        // startClusterHeartbeat porque, se o loop do heartbeat ainda nao tiver se
+        // encerrado (reativacao logo apos ir pro nativo), isClusterHeartbeatRunning
+        // continua true e o start retornaria cedo, sem reenviar o ready — deixando o
+        // carro preso no cluster nativo (reativacao travada).
+        sendAndroidReadyToCluster();
         if (sharedPreferences.getBoolean(
                 SharedPreferencesKeys.ENABLE_INSTRUMENT_CUSTOM_MEDIA_INTEGRATION.getKey(),
                 false)) {
             startClusterHeartbeat();
         }
-        Log.w(TAG, "Cluster reclaimed for Android (heartbeat resumed)");
+        Log.w(TAG, "Cluster reclaimed for Android (android-ready re-sent, heartbeat resumed)");
     }
 
     private void handleSteeringWheelProjectionDisplayToggle(int button) {
@@ -1518,11 +1520,23 @@ public class ServiceManager {
 
     private void sendAndroidReadyToCluster() {
         try {
+            if (clusterService == null) return;
             ClusterMsgData msg = new ClusterMsgData();
             msg.setIntValue(1);
             clusterService.setMsg(75, msg);
         } catch (Exception e) {
             Log.e(TAG, "Error setting cluster service message", e);
+        }
+    }
+
+    private void sendAndroidNotReadyToCluster() {
+        try {
+            if (clusterService == null) return;
+            ClusterMsgData msg = new ClusterMsgData();
+            msg.setIntValue(0);
+            clusterService.setMsg(75, msg);
+        } catch (Exception e) {
+            Log.e(TAG, "Error releasing cluster service message", e);
         }
     }
 
