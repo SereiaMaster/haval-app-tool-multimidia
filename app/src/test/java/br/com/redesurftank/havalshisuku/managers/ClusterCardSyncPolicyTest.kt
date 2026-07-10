@@ -60,4 +60,37 @@ class ClusterCardSyncPolicyTest {
             )
         )
     }
+
+    @Test
+    fun syntheticTargetStaysAuthoritativeAfterLongDelay() {
+        // Mesmo muito tempo depois da navegacao sintetica, o card escolhido pelo usuario
+        // continua autoritativo: um eco divergente do carro (menu) e ignorado, evitando o
+        // "voltar pro menu" sozinho.
+        assertTrue(
+            ClusterCardSyncPolicy.shouldIgnoreNativeClusterCardChanged(
+                3,
+                1,
+                120000L,
+                -1,
+                120000L,
+                3
+            )
+        )
+    }
+
+    @Test
+    fun syntheticTargetAcceptsMatchingCardAfterLongDelay() {
+        // Um eco do carro que coincide com o alvo sintetico nao precisa mudar nada
+        // (previousCard == nextCard), entao e ignorado.
+        assertTrue(
+            ClusterCardSyncPolicy.shouldIgnoreNativeClusterCardChanged(
+                3,
+                3,
+                120000L,
+                -1,
+                120000L,
+                3
+            )
+        )
+    }
 }

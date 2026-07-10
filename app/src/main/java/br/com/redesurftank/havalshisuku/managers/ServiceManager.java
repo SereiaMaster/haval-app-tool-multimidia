@@ -489,6 +489,13 @@ public class ServiceManager {
                         );
                     }
                     if (msgId == 133) {
+                        if (clusterNativeCardActive) {
+                            // Cluster liberado ao carro (modo nativo): o proprio carro navega
+                            // seus subcards nativos e reporta aqui. Ignoramos por completo para
+                            // nao reassumir o cluster nem alternar para o tema virtual. Somente
+                            // o toque longo lateral reativa o cluster projetado.
+                            return;
+                        }
                         int whichCard = data.getIntValue();
                         int previousCard = clusterCardView;
                         long now = SystemClock.uptimeMillis();
@@ -538,7 +545,10 @@ public class ServiceManager {
                             return;
                         }
                         clusterCardView = whichCard;
-                        onClusterCardResolved(clusterCardView);
+                        if (whichCard == NATIVE_CLUSTER_CARD) {
+                            // Estado padrao/boot: o carro esta no cluster nativo -> libera a regiao.
+                            scheduleNativeRelease();
+                        }
                         dispatchServiceManagerEvent(ServiceManagerEventType.CLUSTER_CARD_CHANGED, clusterCardView);
                         Log.w(
                                 TAG,
@@ -1254,10 +1264,12 @@ public class ServiceManager {
     // Toque longo lateral: ativa o cluster projetado. Se ja estiver projetado, mantem o
     // card atual (a navegacao fica por conta do toque curto).
     private void activateProjectedCluster() {
-        if (isProjectedClusterCard(clusterCardView)) {
+        if (!clusterNativeCardActive && isProjectedClusterCard(clusterCardView)) {
             Log.w(TAG, "Projected cluster already active on card " + clusterCardView);
             return;
         }
+        // Reassume a regiao do cluster (retoma o keep-alive) ANTES de mostrar o projetado.
+        reclaimCluster();
         int target = isProjectedClusterCard(lastProjectedClusterCard)
                 ? lastProjectedClusterCard
                 : PROJECTED_CLUSTER_CARDS[0];
@@ -1270,6 +1282,8 @@ public class ServiceManager {
             lastProjectedClusterCard = clusterCardView;
         }
         setSyntheticClusterCard(NATIVE_CLUSTER_CARD, "deactivate_projected_back_long");
+        // Apos o fade do overlay, libera a regiao ao carro (pausa o heartbeat).
+        scheduleNativeRelease();
     }
 
     private void setSyntheticClusterCard(int nextCard, String reason) {
@@ -1286,7 +1300,6 @@ public class ServiceManager {
                 "from=" + previousCard + " to=" + nextCard + " reason=" + reason
         );
         dispatchServiceManagerEvent(ServiceManagerEventType.CLUSTER_CARD_CHANGED, clusterCardView);
-        onClusterCardResolved(nextCard);
     }
 
     private boolean isProjectedClusterCard(int card) {
@@ -1303,46 +1316,51 @@ public class ServiceManager {
     }
 
     /**
-     * Libera ou reassume a regiao do cluster de acordo com o card resolvido.
-     *
-     * Ao entrar no card 0 (cluster nativo do carro) agendamos, apos o fade do overlay,
-     * a interrupcao do keep-alive do cluster Android (heartbeat + android-ready), o que
-     * faz o carro reassumir o cluster nativo navegavel. Como nesse momento o overlay ja
-     * esta transparente, o cluster nativo aparece por baixo. Ao sair do card 0 cancelamos
-     * o release pendente e reassumimos o cluster imediatamente.
+     * Entra no modo nativo: apos o fade do overlay, interrompe o keep-alive do cluster
+     * Android (heartbeat + android-ready). Isso faz o carro reassumir o cluster nativo
+     * navegavel; como o overlay ja esta transparente nesse ponto, o nativo aparece por
+     * baixo. Enquanto neste modo, os reports de card do carro (msgId 133) sao ignorados,
+     * entao a navegacao nativa do carro nao reativa o cluster projetado.
      */
-    private void onClusterCardResolved(int card) {
+    private void scheduleNativeRelease() {
         if (backgroundHandler == null) return;
-        if (card == NATIVE_CLUSTER_CARD) {
-            if (clusterNativeCardActive) return;
-            clusterNativeCardActive = true;
-            if (clusterNativeReleaseRunnable != null) {
-                backgroundHandler.removeCallbacks(clusterNativeReleaseRunnable);
-            }
-            clusterNativeReleaseRunnable = () -> {
-                clusterNativeReleaseRunnable = null;
-                if (!clusterNativeCardActive) return;
-                clusterHeartbeatPaused = true;
-                sendAndroidNotReadyToCluster();
-                Log.w(TAG, "Cluster native card active: released cluster to car (heartbeat paused after fade)");
-            };
-            backgroundHandler.postDelayed(clusterNativeReleaseRunnable, NATIVE_CARD_HEARTBEAT_RELEASE_DELAY_MS);
-        } else if (isProjectedClusterCard(card)) {
-            if (!clusterNativeCardActive) return;
-            clusterNativeCardActive = false;
-            if (clusterNativeReleaseRunnable != null) {
-                backgroundHandler.removeCallbacks(clusterNativeReleaseRunnable);
-                clusterNativeReleaseRunnable = null;
-            }
-            clusterHeartbeatPaused = false;
-            if (sharedPreferences.getBoolean(
-                    SharedPreferencesKeys.ENABLE_INSTRUMENT_CUSTOM_MEDIA_INTEGRATION.getKey(),
-                    false)) {
-                startClusterHeartbeat();
-            }
-            Log.w(TAG, "Cluster native card cleared: reclaimed cluster (heartbeat resumed)");
+        if (clusterNativeCardActive) return;
+        clusterNativeCardActive = true;
+        if (clusterNativeReleaseRunnable != null) {
+            backgroundHandler.removeCallbacks(clusterNativeReleaseRunnable);
         }
-        // Demais cards (subcards nativos do carro, ex.: 2) nao alteram o estado do heartbeat.
+        clusterNativeReleaseRunnable = () -> {
+            clusterNativeReleaseRunnable = null;
+            if (!clusterNativeCardActive) return;
+            // Apenas para o keep-alive (para de enviar setMsg 134), exatamente como o
+            // desligar-a-flag faz. NAO enviamos setMsg(75, 0): esse sinal de
+            // "android-not-ready" coloca o carro em estado de espera ("Carregando")
+            // ate um input nudge. Deixando o heartbeat expirar, o carro cai direto no
+            // cluster nativo.
+            clusterHeartbeatPaused = true;
+            Log.w(TAG, "Cluster native card active: released cluster to car (heartbeat paused after fade)");
+        };
+        backgroundHandler.postDelayed(clusterNativeReleaseRunnable, NATIVE_CARD_HEARTBEAT_RELEASE_DELAY_MS);
+    }
+
+    /**
+     * Reassume a regiao do cluster para o Android (retoma o keep-alive) de forma imediata,
+     * cancelando qualquer release pendente. Chamado somente na ativacao explicita (toque
+     * longo lateral).
+     */
+    private void reclaimCluster() {
+        clusterNativeCardActive = false;
+        if (backgroundHandler != null && clusterNativeReleaseRunnable != null) {
+            backgroundHandler.removeCallbacks(clusterNativeReleaseRunnable);
+            clusterNativeReleaseRunnable = null;
+        }
+        clusterHeartbeatPaused = false;
+        if (sharedPreferences.getBoolean(
+                SharedPreferencesKeys.ENABLE_INSTRUMENT_CUSTOM_MEDIA_INTEGRATION.getKey(),
+                false)) {
+            startClusterHeartbeat();
+        }
+        Log.w(TAG, "Cluster reclaimed for Android (heartbeat resumed)");
     }
 
     private void handleSteeringWheelProjectionDisplayToggle(int button) {
@@ -1505,17 +1523,6 @@ public class ServiceManager {
             clusterService.setMsg(75, msg);
         } catch (Exception e) {
             Log.e(TAG, "Error setting cluster service message", e);
-        }
-    }
-
-    private void sendAndroidNotReadyToCluster() {
-        try {
-            if (clusterService == null) return;
-            ClusterMsgData msg = new ClusterMsgData();
-            msg.setIntValue(0);
-            clusterService.setMsg(75, msg);
-        } catch (Exception e) {
-            Log.e(TAG, "Error releasing cluster service message", e);
         }
     }
 

@@ -6,7 +6,6 @@ public final class ClusterCardSyncPolicy {
     private static final int CLUSTER_KEY_LEFT = 1026;
     private static final int CLUSTER_KEY_RIGHT = 1027;
     private static final long NATIVE_CLUSTER_CARD_INPUT_WINDOW_MS = 2500L;
-    private static final long SYNTHETIC_CLUSTER_CARD_ECHO_WINDOW_MS = 1500L;
 
     private ClusterCardSyncPolicy() {
     }
@@ -21,19 +20,17 @@ public final class ClusterCardSyncPolicy {
     ) {
         if (previousCard == nextCard) return true;
 
-        if (isRecentSyntheticClusterCardNavigation(sinceSyntheticMs, lastSyntheticTarget)) {
+        // A escolha sintetica do usuario (toque no volante) e autoritativa ate a proxima
+        // navegacao sintetica: qualquer card divergente reportado pelo carro e ignorado
+        // indefinidamente. Isso impede o cluster de "voltar pro menu" sozinho de tempos
+        // em tempos quando o carro reenvia seu card padrao.
+        if (lastSyntheticTarget >= 0) {
             return nextCard != lastSyntheticTarget;
         }
 
         if (nextCard != 0) return false;
         if (previousCard != MAIN_MENU_CARD && previousCard != AIRCON_CARD) return false;
         return !isRecentClusterCardNavigationInput(lastInputKeyCode, sinceInputMs);
-    }
-
-    private static boolean isRecentSyntheticClusterCardNavigation(long sinceSyntheticMs, int lastSyntheticTarget) {
-        return lastSyntheticTarget >= 0
-                && sinceSyntheticMs >= 0L
-                && sinceSyntheticMs <= SYNTHETIC_CLUSTER_CARD_ECHO_WINDOW_MS;
     }
 
     private static boolean isRecentClusterCardNavigationInput(int lastInputKeyCode, long sinceInputMs) {
