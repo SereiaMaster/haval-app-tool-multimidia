@@ -477,7 +477,12 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
                         isWarningActive,
                         projectionActive
                 )
-        val hidden = bypassActive || nativeCardPassThrough
+        // Modo nativo liberado (long-press Voltar): esconde o overlay de VERDADE, igual ao
+        // estado de flag desligada. So deixar o HTML transparente nao basta — a superficie
+        // do Presentation continua composta pelo carro e os demais cards nativos ficam
+        // pretos. Com root.isVisible=false o carro reassume 100% do cluster nativo.
+        val releasedToNative = ServiceManager.getInstance().isClusterReleasedToNative()
+        val hidden = bypassActive || nativeCardPassThrough || releasedToNative
         val alpha = if (hidden) 0f else 1f
         root.alpha = alpha
         root.isVisible = visible && !hidden
@@ -842,6 +847,13 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
                     when (event) {
                         ServiceManagerEventType.CLUSTER_CARD_CHANGED -> {
                             handleClusterCardChanged(args[0] as Int)
+                        }
+                        ServiceManagerEventType.CLUSTER_NATIVE_RELEASE_CHANGED -> {
+                            // O ServiceManager liberou/reassumiu o cluster nativo; reavalia a
+                            // visibilidade para esconder/reexibir o root do projetor.
+                            updateVirtualClusterVisibility(
+                                    reason = "CLUSTER_NATIVE_RELEASE_CHANGED"
+                            )
                         }
                         ServiceManagerEventType.CLUSTER_INPUT_KEY -> {
                             val keyName = args.getOrNull(0) as? String ?: "UNKNOWN"

@@ -1326,11 +1326,17 @@ public class ServiceManager {
     }
 
     /**
-     * Entra no modo nativo: apos o fade do overlay, interrompe o keep-alive do cluster
-     * Android (heartbeat + android-ready). Isso faz o carro reassumir o cluster nativo
-     * navegavel; como o overlay ja esta transparente nesse ponto, o nativo aparece por
-     * baixo. Enquanto neste modo, os reports de card do carro (msgId 133) sao ignorados,
-     * entao a navegacao nativa do carro nao reativa o cluster projetado.
+     * Entra no modo nativo replicando EXATAMENTE o estado de "flag desligada" (que
+     * comprovadamente devolve o cluster nativo completo e navegavel):
+     *   1) apos o fade do tema (delay), interrompe o keep-alive (heartbeat) — sem enviar
+     *      android-not-ready (75=0), pois isso disparava o "Carregando" nativo e o flag-off
+     *      nao usa; parar o heartbeat ja basta para o carro reassumir;
+     *   2) avisa o projetor (CLUSTER_NATIVE_RELEASE_CHANGED) para ESCONDER o root/WebView
+     *      de verdade (root.isVisible=false), igual ao flag-off. So deixar o HTML do tema
+     *      transparente nao basta: a superficie do Presentation continua composta pelo
+     *      carro e ele pinta os demais cards nativos de preto.
+     * Enquanto neste modo, os reports do carro (msgId 133/134) sao ignorados, entao a
+     * navegacao nativa do carro nao reativa o cluster projetado.
      */
     private void scheduleNativeRelease() {
         if (backgroundHandler == null) return;
@@ -1343,10 +1349,22 @@ public class ServiceManager {
             clusterNativeReleaseRunnable = null;
             if (!clusterNativeCardActive) return;
             clusterHeartbeatPaused = true;
-            sendAndroidNotReadyToCluster();
-            Log.w(TAG, "Cluster native card active: released cluster to car (heartbeat paused after fade)");
+            // Esconde o overlay do projetor (igual flag-off) para o carro reassumir 100%
+            // do cluster nativo, incluindo os demais cards que ficavam pretos.
+            dispatchServiceManagerEvent(ServiceManagerEventType.CLUSTER_NATIVE_RELEASE_CHANGED);
+            Log.w(TAG, "Cluster native card active: released cluster to car (heartbeat paused + overlay hidden after fade)");
         };
         backgroundHandler.postDelayed(clusterNativeReleaseRunnable, NATIVE_CARD_HEARTBEAT_RELEASE_DELAY_MS);
+    }
+
+    /**
+     * Cluster "liberado ao nativo" quando estamos em modo nativo E o heartbeat ja foi
+     * pausado (apos o fade). O projetor usa isso para esconder o root/WebView, replicando
+     * o estado de flag desligada. Antes do fade (heartbeat ainda ativo) mantemos o overlay
+     * para a animacao de saida do tema.
+     */
+    public boolean isClusterReleasedToNative() {
+        return clusterNativeCardActive && clusterHeartbeatPaused;
     }
 
     /**
@@ -1372,7 +1390,9 @@ public class ServiceManager {
                 false)) {
             startClusterHeartbeat();
         }
-        Log.w(TAG, "Cluster reclaimed for Android (android-ready re-sent, heartbeat resumed)");
+        // Reexibe o overlay do projetor (desfaz o hide do release nativo).
+        dispatchServiceManagerEvent(ServiceManagerEventType.CLUSTER_NATIVE_RELEASE_CHANGED);
+        Log.w(TAG, "Cluster reclaimed for Android (android-ready re-sent, heartbeat resumed, overlay restored)");
     }
 
     private void handleSteeringWheelProjectionDisplayToggle(int button) {
