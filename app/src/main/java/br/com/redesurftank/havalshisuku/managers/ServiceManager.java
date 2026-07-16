@@ -269,6 +269,11 @@ public class ServiceManager {
     // Atraso apos entrar no card 0 para aguardar o fade do overlay antes de soltar o
     // heartbeat (o carro so reassume o cluster nativo depois que paramos o keep-alive).
     private static final long NATIVE_CARD_HEARTBEAT_RELEASE_DELAY_MS = 700L;
+    // App nativo que renderiza o cluster do carro (cards de dados do celular/conexao etc.).
+    // Enquanto o nosso cluster esta ativo ele fica desinstalado (ver ensureSystemApps) para nao
+    // brigar com a gente; ao desativar o cluster projetado precisamos reabilita-lo para o
+    // cluster nativo carregar completo (senao so aparece o cluster basico e o resto fica preto).
+    private static final String NATIVE_CLUSTER_PROVIDER_PACKAGE = "com.beantechs.multidisplay";
     private Runnable clusterNativeReleaseRunnable = null;
     private long lastClusterInputAtMs = 0L;
     private int lastClusterInputKeyCode = -1;
@@ -1352,7 +1357,10 @@ public class ServiceManager {
             // Esconde o overlay do projetor (igual flag-off) para o carro reassumir 100%
             // do cluster nativo, incluindo os demais cards que ficavam pretos.
             dispatchServiceManagerEvent(ServiceManagerEventType.CLUSTER_NATIVE_RELEASE_CHANGED);
-            Log.w(TAG, "Cluster native card active: released cluster to car (heartbeat paused + overlay hidden after fade)");
+            // Reabilita o provedor nativo do cluster para os cards secundarios (celular/
+            // conexao etc.) recarregarem; sem isso so aparece o cluster basico do carro.
+            enableSystemApp(NATIVE_CLUSTER_PROVIDER_PACKAGE);
+            Log.w(TAG, "Cluster native card active: released cluster to car (heartbeat paused + overlay hidden + native provider re-enabled after fade)");
         };
         backgroundHandler.postDelayed(clusterNativeReleaseRunnable, NATIVE_CARD_HEARTBEAT_RELEASE_DELAY_MS);
     }
@@ -1392,7 +1400,15 @@ public class ServiceManager {
         }
         // Reexibe o overlay do projetor (desfaz o hide do release nativo).
         dispatchServiceManagerEvent(ServiceManagerEventType.CLUSTER_NATIVE_RELEASE_CHANGED);
-        Log.w(TAG, "Cluster reclaimed for Android (android-ready re-sent, heartbeat resumed, overlay restored)");
+        // Desabilita novamente o provedor nativo do cluster para nao brigar com o nosso
+        // overlay. Roda no backgroundHandler porque e um comando de shell (pm) que nao deve
+        // bloquear a thread de input do volante.
+        if (backgroundHandler != null) {
+            backgroundHandler.post(() -> disableSystemApp(NATIVE_CLUSTER_PROVIDER_PACKAGE));
+        } else {
+            disableSystemApp(NATIVE_CLUSTER_PROVIDER_PACKAGE);
+        }
+        Log.w(TAG, "Cluster reclaimed for Android (android-ready re-sent, heartbeat resumed, overlay restored, native provider disabled)");
     }
 
     private void handleSteeringWheelProjectionDisplayToggle(int button) {
