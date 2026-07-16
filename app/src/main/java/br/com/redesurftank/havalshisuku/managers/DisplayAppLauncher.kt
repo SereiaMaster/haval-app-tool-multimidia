@@ -410,12 +410,6 @@ object DisplayAppLauncher {
     @Volatile private var lastAndroidAutoDcmProjectionActiveAtMs = 0L
     private val androidAutoSteeringPlaybackReconcileGeneration = AtomicInteger(0)
     private val androidAutoSteeringSkipFallbackGeneration = AtomicInteger(0)
-    // Assinatura da midia capturada no ACTION_DOWN da tecla de skip do volante (AA), ou seja,
-    // ANTES de a rota nativa trocar a faixa. O fallback (agendado no ACTION_UP) compara contra
-    // esta baseline para nao injetar um segundo skip quando a faixa ja mudou (double-skip).
-    @Volatile private var androidAutoSteeringSkipBaselineSignature: String? = null
-    @Volatile private var androidAutoSteeringSkipBaselineKeyCode: Int = 0
-    @Volatile private var androidAutoSteeringSkipBaselineAtMs: Long = 0L
     private val androidAutoSteeringInputDedupLock = Any()
     private val androidAutoLinkCommandLock = Any()
     @Volatile private var androidAutoLinkCommandBinder: IBinder? = null
@@ -5338,43 +5332,17 @@ object DisplayAppLauncher {
         if (
             source == AndroidAutoMediaKeySource.STEERING_INPUT &&
             isAndroidAutoSteeringSkipKey(keyCode) &&
-            action == KeyEvent.ACTION_DOWN &&
-            nativeMediaCenterActive &&
-            !useAppCommandRoute
-        ) {
-            // Captura a baseline ANTES de a rota nativa trocar a faixa. Sem isso, a baseline
-            // era capturada no UP (quando os metadados ja podem ter mudado), fazendo o fallback
-            // achar que "nada mudou" e injetar um segundo skip -> double-skip.
-            androidAutoSteeringSkipBaselineSignature = androidAutoSteeringMediaSignature()
-            androidAutoSteeringSkipBaselineKeyCode = keyCode
-            androidAutoSteeringSkipBaselineAtMs = now
-        }
-        if (
-            source == AndroidAutoMediaKeySource.STEERING_INPUT &&
-            isAndroidAutoSteeringSkipKey(keyCode) &&
             action == KeyEvent.ACTION_UP &&
             nativeMediaCenterActive &&
             !useAppCommandRoute
         ) {
+            // A rota nativa do carro ja executa o skip de forma confiavel pelo volante.
+            // NAO agendamos mais o fallback de skip: ele so roda sob Android Auto, e nesse
+            // cenario a assinatura de midia (BottomBarState) nao reflete a troca de faixa,
+            // entao o check "nao mudou" dava sempre positivo e injetava um SEGUNDO skip ->
+            // musica trocava de 2 em 2 sempre. Mantemos apenas o reset visual de progresso.
             BottomBarService.markAndroidAutoTrackCommandProgressReset(
                 "Android Auto steering ${androidAutoTrackCommandName(keyCode)}"
-            )
-            // Usa a baseline do DOWN (pre-skip nativo) quando disponivel para o mesmo keyCode e
-            // recente; caso contrario, cai para a assinatura atual (comportamento anterior).
-            val baselineSignature =
-                if (androidAutoSteeringSkipBaselineKeyCode == keyCode &&
-                    androidAutoSteeringSkipBaselineSignature != null &&
-                    now - androidAutoSteeringSkipBaselineAtMs <= 1_500L
-                ) {
-                    androidAutoSteeringSkipBaselineSignature!!
-                } else {
-                    androidAutoSteeringMediaSignature()
-                }
-            skipFallbackScheduled = true
-            scheduleAndroidAutoSteeringSkipFallbackIfUnchanged(
-                keyCode = keyCode,
-                initialSignature = baselineSignature,
-                reason = "AA_STEERING_MEDIA_${keyCode}_ACTION_${action}"
             )
         }
         if (shouldSuppressAndroidAutoSteeringMediaInjection(source) && !useAppCommandRoute) {
