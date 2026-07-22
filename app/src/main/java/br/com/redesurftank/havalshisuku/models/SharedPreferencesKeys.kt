@@ -245,6 +245,10 @@ enum class SharedPreferencesKeys(val key: String, val description: String) {
             "instrumentMaskDisplayId",
             "ID da tela para o Virtual Cluster (Fixado em 3)"
     ),
+    LAST_CLUSTER_CARD(
+            "lastClusterCard",
+            "Ultimo card do cluster (0=nativo, 1=menu, 3=ar) para restaurar no boot"
+    ),
     CURRENT_CLUSTER_TEMPLATE("currentClusterTemplate", "Template atual do cluster"),
     CURRENT_CLUSTER_DISPLAY("currentClusterDisplay", "Modo de exibição do cluster"),
     DEFAULT_DISPLAY_APP_PACKAGE(

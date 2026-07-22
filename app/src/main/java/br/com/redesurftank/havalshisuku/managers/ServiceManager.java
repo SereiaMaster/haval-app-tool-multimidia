@@ -269,12 +269,25 @@ public class ServiceManager {
     // Atraso apos entrar no card 0 para aguardar o fade do overlay antes de soltar o
     // heartbeat (o carro so reassume o cluster nativo depois que paramos o keep-alive).
     private static final long NATIVE_CARD_HEARTBEAT_RELEASE_DELAY_MS = 700L;
+    // Atraso maior usado quando o desativar precisa reinstalar o provedor nativo + reiniciar o
+    // clusterservice: mantemos o overlay cobrindo por mais tempo para o cluster nativo recompor
+    // antes de revelar, evitando (o maximo possivel) um flash preto durante o reload.
+    private static final long NATIVE_CARD_REINSTALL_RELEASE_DELAY_MS = 2600L;
     // App nativo que renderiza o cluster do carro (cards de dados do celular/conexao etc.).
-    // Enquanto o nosso cluster esta ativo ele fica desinstalado (ver ensureSystemApps) para nao
-    // brigar com a gente; ao desativar o cluster projetado precisamos reabilita-lo para o
-    // cluster nativo carregar completo (senao so aparece o cluster basico e o resto fica preto).
+    // Enquanto o nosso cluster esta ativo ele fica DESINSTALADO (nao so morto): force-stop nao
+    // basta porque o carro relanca o multidisplay sozinho e ele volta a navegar por baixo do
+    // overlay. Ao desativar o cluster projetado precisamos reinstala-lo E reiniciar o
+    // clusterservice para o cluster nativo carregar completo (senao so aparece o cluster basico
+    // e o resto fica preto).
     private static final String NATIVE_CLUSTER_PROVIDER_PACKAGE = "com.beantechs.multidisplay";
+    // Servico de sistema que compoe o cluster e vincula o provedor nativo. Reiniciar ele forca
+    // um reload/re-scan que re-vincula o multidisplay recem reinstalado sem precisar de reboot.
+    private static final String CLUSTER_SERVICE_PACKAGE = "com.autolink.clusterservice";
     private Runnable clusterNativeReleaseRunnable = null;
+    // Garante que o modo do cluster (nativo x projetado) so seja restaurado do disco UMA vez no
+    // boot. Reconexoes posteriores (ex.: apos reiniciarmos o clusterservice no desativar) devem
+    // respeitar o estado atual em memoria, nao reler do disco.
+    private boolean clusterBootModeRestored = false;
     private long lastClusterInputAtMs = 0L;
     private int lastClusterInputKeyCode = -1;
     private String lastClusterInputKeyName = "";
@@ -550,10 +563,10 @@ public class ServiceManager {
                             return;
                         }
                         clusterCardView = whichCard;
-                        if (whichCard == NATIVE_CLUSTER_CARD) {
-                            // Estado padrao/boot: o carro esta no cluster nativo -> libera a regiao.
-                            scheduleNativeRelease();
-                        }
+                        // O modo nativo x projetado no boot e decidido pelo estado persistido
+                        // (restoreClusterModeOnBoot) e, em runtime, apenas pelo toque longo
+                        // (activate/deactivate). Nao liberamos mais para o nativo so porque o
+                        // carro reportou o card 0, para nao alternar de modo sem o toque longo.
                         dispatchServiceManagerEvent(ServiceManagerEventType.CLUSTER_CARD_CHANGED, clusterCardView);
                         Log.w(
                                 TAG,
@@ -616,7 +629,19 @@ public class ServiceManager {
                 public void onServiceConnected(ComponentName name, IBinder service) {
                     clusterService = IClusterService.Stub.asInterface(service);
                     try { clusterService.registerCallback(clusterCallback); } catch (Exception e) {}
-                    if (sharedPreferences.getBoolean(SharedPreferencesKeys.ENABLE_INSTRUMENT_CUSTOM_MEDIA_INTEGRATION.getKey(), false)) {
+                    if (!sharedPreferences.getBoolean(SharedPreferencesKeys.ENABLE_INSTRUMENT_CUSTOM_MEDIA_INTEGRATION.getKey(), false)) {
+                        return;
+                    }
+                    if (!clusterBootModeRestored) {
+                        // Primeira conexao (boot): restaura o ultimo modo salvo (nativo x projetado)
+                        // em vez de sempre projetar por causa da flag.
+                        clusterBootModeRestored = true;
+                        restoreClusterModeOnBoot();
+                    } else if (!clusterNativeCardActive) {
+                        // Reconexao (ex.: apos reiniciarmos o clusterservice no desativar): so
+                        // retoma o heartbeat se ainda estamos em modo projetado. Se estamos indo/
+                        // no modo nativo, NAO reiniciamos o heartbeat (senao reassumiriamos o
+                        // cluster e desfariamos o desativar).
                         startClusterHeartbeat();
                     }
                 }
@@ -1297,11 +1322,13 @@ public class ServiceManager {
             lastProjectedClusterCard = clusterCardView;
         }
         setSyntheticClusterCard(NATIVE_CLUSTER_CARD, "deactivate_projected_back_long");
-        // Religa o provedor nativo cedo, para ele estar pronto/desenhando quando o overlay
-        // sumir (apos o fade). Enquanto o overlay ainda cobre, ele desenha por baixo (ok).
+        // Reinstala o provedor nativo + reinicia o clusterservice CEDO (ele foi desinstalado ao
+        // ativar). Comeca o reload em paralelo com o fade do overlay para o cluster nativo estar
+        // recomposto quando revelarmos.
         startNativeClusterProvider();
-        // Apos o fade do overlay, libera a regiao ao carro (pausa o heartbeat).
-        scheduleNativeRelease();
+        // Usa o delay maior: o overlay cobre ate o reload (reinstall + restart do clusterservice)
+        // provavelmente terminar, minimizando o flash preto ao revelar o cluster nativo.
+        scheduleNativeRelease(NATIVE_CARD_REINSTALL_RELEASE_DELAY_MS);
     }
 
     private void setSyntheticClusterCard(int nextCard, String reason) {
@@ -1312,6 +1339,7 @@ public class ServiceManager {
         }
         lastSyntheticClusterCardNavigationAtMs = SystemClock.uptimeMillis();
         lastSyntheticClusterCardTarget = nextCard;
+        persistLastClusterCard(nextCard);
         Log.w(TAG, "Synthetic cluster card set: " + previousCard + " -> " + nextCard + " reason=" + reason);
         logPersistentClusterEvent(
                 "synthetic_cluster_card_navigation",
@@ -1333,6 +1361,54 @@ public class ServiceManager {
         return -1;
     }
 
+    private void persistLastClusterCard(int card) {
+        try {
+            sharedPreferences.edit()
+                    .putInt(SharedPreferencesKeys.LAST_CLUSTER_CARD.getKey(), card)
+                    .apply();
+        } catch (Exception e) {
+            Log.e(TAG, "Error persisting last cluster card", e);
+        }
+    }
+
+    /**
+     * Restaura o modo do cluster (nativo x projetado) a partir do ultimo estado salvo, em vez de
+     * sempre iniciar projetado por causa da flag da tela "Telas". So roda quando a flag de
+     * integracao/projecao esta ligada; com ela desligada nao ha projecao alguma.
+     *
+     * - Ultimo estado NATIVO (card 0): nao projeta. Marca clusterNativeCardActive + heartbeat
+     *   pausado e esconde o overlay; o multidisplay ja esta instalado (ensureSystemApps) e desenha
+     *   o cluster nativo. So o toque longo lateral reativa o projetado.
+     * - Ultimo estado PROJETADO (card 1/3): inicia o heartbeat no card salvo e desinstala o
+     *   multidisplay (modo projetado nao usa o provedor nativo por baixo).
+     */
+    private void restoreClusterModeOnBoot() {
+        int lastCard = sharedPreferences.getInt(
+                SharedPreferencesKeys.LAST_CLUSTER_CARD.getKey(),
+                PROJECTED_CLUSTER_CARDS[0]);
+        if (lastCard == NATIVE_CLUSTER_CARD) {
+            clusterNativeCardActive = true;
+            clusterHeartbeatPaused = true;
+            clusterCardView = NATIVE_CLUSTER_CARD;
+            lastProjectedClusterCard = PROJECTED_CLUSTER_CARDS[0];
+            lastSyntheticClusterCardTarget = NATIVE_CLUSTER_CARD;
+            dispatchServiceManagerEvent(ServiceManagerEventType.CLUSTER_NATIVE_RELEASE_CHANGED);
+            Log.w(TAG, "Boot: restored NATIVE cluster mode (persisted, overlay hidden)");
+        } else {
+            int card = isProjectedClusterCard(lastCard) ? lastCard : PROJECTED_CLUSTER_CARDS[0];
+            clusterNativeCardActive = false;
+            clusterHeartbeatPaused = false;
+            clusterCardView = card;
+            lastProjectedClusterCard = card;
+            lastSyntheticClusterCardTarget = card;
+            startClusterHeartbeat();
+            dispatchServiceManagerEvent(ServiceManagerEventType.CLUSTER_CARD_CHANGED, card);
+            // Modo projetado nao usa o provedor nativo por baixo (evita o volante navegar ele).
+            stopNativeClusterProvider();
+            Log.w(TAG, "Boot: restored PROJECTED cluster mode on card " + card + " (persisted)");
+        }
+    }
+
     /**
      * Entra no modo nativo replicando EXATAMENTE o estado de "flag desligada" (que
      * comprovadamente devolve o cluster nativo completo e navegavel):
@@ -1347,6 +1423,10 @@ public class ServiceManager {
      * navegacao nativa do carro nao reativa o cluster projetado.
      */
     private void scheduleNativeRelease() {
+        scheduleNativeRelease(NATIVE_CARD_HEARTBEAT_RELEASE_DELAY_MS);
+    }
+
+    private void scheduleNativeRelease(long delayMs) {
         if (backgroundHandler == null) return;
         if (clusterNativeCardActive) return;
         clusterNativeCardActive = true;
@@ -1360,12 +1440,13 @@ public class ServiceManager {
             // Esconde o overlay do projetor (igual flag-off) para o carro reassumir 100%
             // do cluster nativo, incluindo os demais cards que ficavam pretos.
             dispatchServiceManagerEvent(ServiceManagerEventType.CLUSTER_NATIVE_RELEASE_CHANGED);
-            // O provedor nativo (com.beantechs.multidisplay) fica sempre rodando (ver
-            // ensureSystemApps), entao ao esconder o overlay o cluster nativo ja aparece
-            // completo — nao precisamos reinstalar/religar nada aqui.
+            // Quando viemos de um desativar, o provedor nativo ja foi reinstalado + o
+            // clusterservice reiniciado (ver deactivateProjectedCluster/startNativeClusterProvider),
+            // entao ao esconder o overlay o cluster nativo aparece completo. No boot (card 0),
+            // o multidisplay ja esta instalado por ensureSystemApps.
             Log.w(TAG, "Cluster native card active: released cluster to car (heartbeat paused + overlay hidden after fade)");
         };
-        backgroundHandler.postDelayed(clusterNativeReleaseRunnable, NATIVE_CARD_HEARTBEAT_RELEASE_DELAY_MS);
+        backgroundHandler.postDelayed(clusterNativeReleaseRunnable, delayMs);
     }
 
     /**
@@ -1403,60 +1484,73 @@ public class ServiceManager {
         }
         // Reexibe o overlay do projetor (desfaz o hide do release nativo).
         dispatchServiceManagerEvent(ServiceManagerEventType.CLUSTER_NATIVE_RELEASE_CHANGED);
-        // Mata o provedor nativo do cluster enquanto o projetado estiver visivel. O nosso
+        // DESINSTALA o provedor nativo do cluster enquanto o projetado estiver visivel. O nosso
         // listener de teclas e apenas notificacao (dispatchKeyEvent retorna void), entao NAO
-        // conseguimos consumir/bloquear a tecla do volante para o provedor nativo. Como o
-        // Android detem o cluster agora (heartbeat/75=1), o carro nao precisa do provedor,
-        // e mata-lo garante que o volante nao navegue o cluster nativo por baixo do overlay.
+        // conseguimos consumir/bloquear a tecla do volante para o provedor nativo. Um force-stop
+        // nao segura (o carro relanca o multidisplay sozinho), entao desinstalamos de vez para o
+        // volante nao navegar o cluster nativo por baixo do overlay. Ao desativar reinstalamos +
+        // reiniciamos o clusterservice para recompor o cluster nativo completo.
         stopNativeClusterProvider();
-        Log.w(TAG, "Cluster reclaimed for Android (android-ready re-sent, heartbeat resumed, overlay restored, native provider stopped)");
+        Log.w(TAG, "Cluster reclaimed for Android (android-ready re-sent, heartbeat resumed, overlay restored, native provider uninstalled)");
     }
 
     /**
-     * Mata o processo do provedor nativo do cluster (com.beantechs.multidisplay) sem
-     * desinstala-lo. Usado ao ativar o cluster projetado: enquanto o Android detem a regiao
-     * do cluster, o provedor nativo nao deve rodar (nem desenhar nem processar as teclas do
-     * volante). Roda em background para nao travar a thread de input.
+     * DESINSTALA o provedor nativo do cluster (com.beantechs.multidisplay) ao ativar o cluster
+     * projetado. Nao basta um force-stop: o carro relanca o multidisplay sozinho e ele volta a
+     * navegar por baixo do overlay (o nosso listener de teclas e apenas notificacao, nao
+     * conseguimos consumir a tecla). Desinstalar remove ele de vez -> zero interferencia. Roda
+     * em background para nao travar a thread de input.
      */
     private void stopNativeClusterProvider() {
         if (backgroundHandler == null) {
-            forceStopNativeClusterProviderBlocking();
+            uninstallNativeClusterProviderBlocking();
             return;
         }
-        backgroundHandler.post(this::forceStopNativeClusterProviderBlocking);
+        backgroundHandler.post(this::uninstallNativeClusterProviderBlocking);
     }
 
-    private void forceStopNativeClusterProviderBlocking() {
+    private void uninstallNativeClusterProviderBlocking() {
         try {
-            ShizukuUtils.runCommandAndGetOutput(new String[]{"am", "force-stop", NATIVE_CLUSTER_PROVIDER_PACKAGE});
-            Log.w(TAG, "Native cluster provider force-stopped (projected active)");
+            ShizukuUtils.runCommandAndGetOutput(new String[]{"pm", "uninstall", "--user", "0", NATIVE_CLUSTER_PROVIDER_PACKAGE});
+            ShizukuUtils.runCommandAndGetOutput(new String[]{"pkill", "-9", "-f", NATIVE_CLUSTER_PROVIDER_PACKAGE});
+            Log.w(TAG, "Native cluster provider uninstalled (projected active)");
         } catch (Exception e) {
-            Log.e(TAG, "Error force-stopping native cluster provider", e);
+            Log.e(TAG, "Error uninstalling native cluster provider", e);
         }
     }
 
     /**
-     * (Re)inicia o provedor nativo do cluster ao liberar a regiao para o carro. O gatilho
-     * principal e o proprio carro reassumir o cluster quando pausamos o heartbeat e
-     * escondemos o overlay; ainda assim tentamos um relance best-effort caso o carro nao o
-     * faca sozinho. Como o app fica sempre INSTALADO (nunca mais desinstalamos), este relance
-     * e um start normal (nao um reinstall), entao ele re-vincula ao cluster sem precisar de
-     * reboot — resolvendo os cards nativos que antes ficavam pretos.
+     * Ao liberar a regiao para o carro (long-press voltar), REINSTALA o provedor nativo e
+     * FORCA um reload do cluster reiniciando o clusterservice.
+     *
+     * Por que reiniciar o clusterservice: o cluster nativo e composto por
+     * com.autolink.clusterservice (processo separado), que vincula o multidisplay para
+     * desenhar os cards. Quando desinstalamos o multidisplay, esse vinculo fica stale; um
+     * simples pm install-existing (ou relancar via monkey) nao faz o clusterservice
+     * re-escanear -> so o card basico voltava e os demais (celular/conexao/nav) ficavam
+     * pretos ate um reboot. Reiniciando o clusterservice ele recompoe o cluster do zero e
+     * re-vincula o multidisplay recem reinstalado, sem reboot.
+     *
+     * Obs: o nosso proprio bind ao clusterservice cai (onServiceDisconnected -> clusterService
+     * = null) e reconecta sozinho via BIND_AUTO_CREATE, re-registrando o callback. Como
+     * estamos indo para o modo nativo, nao precisamos projetar nesse intervalo.
      */
     private void startNativeClusterProvider() {
         if (backgroundHandler == null) {
-            launchNativeClusterProviderBlocking();
+            reinstallAndReloadNativeClusterProviderBlocking();
             return;
         }
-        backgroundHandler.post(this::launchNativeClusterProviderBlocking);
+        backgroundHandler.post(this::reinstallAndReloadNativeClusterProviderBlocking);
     }
 
-    private void launchNativeClusterProviderBlocking() {
+    private void reinstallAndReloadNativeClusterProviderBlocking() {
         try {
-            ShizukuUtils.runCommandAndGetOutput(new String[]{"monkey", "-p", NATIVE_CLUSTER_PROVIDER_PACKAGE, "-c", "android.intent.category.LAUNCHER", "1"});
-            Log.w(TAG, "Native cluster provider (re)launch attempted (released to native)");
+            ShizukuUtils.runCommandAndGetOutput(new String[]{"pm", "install-existing", NATIVE_CLUSTER_PROVIDER_PACKAGE});
+            // Forca o reload: reiniciar o servico de cluster re-escaneia/re-vincula o provedor.
+            ShizukuUtils.runCommandAndGetOutput(new String[]{"am", "force-stop", CLUSTER_SERVICE_PACKAGE});
+            Log.w(TAG, "Native cluster provider reinstalled + clusterservice restarted (reload forced)");
         } catch (Exception e) {
-            Log.e(TAG, "Error launching native cluster provider", e);
+            Log.e(TAG, "Error reinstalling/reloading native cluster provider", e);
         }
     }
 
@@ -2996,18 +3090,15 @@ public class ServiceManager {
     }
 
     public void ensureSystemApps() {
-        // Mantemos o provedor nativo do cluster (com.beantechs.multidisplay) SEMPRE instalado.
-        // Antes ele era DESINSTALADO enquanto o cluster projetado estava ativo, mas isso impedia
-        // o cluster nativo de recarregar ao desativar: reinstalar em runtime (pm install-existing)
-        // nao re-vincula o app ao framework do cluster sem um reboot, entao os cards nativos
-        // (celular/conexao) ficavam pretos.
+        // No boot garantimos o provedor nativo do cluster (com.beantechs.multidisplay) INSTALADO,
+        // para o cluster nativo funcionar quando nao estamos projetando (card 0).
         //
-        // Estrategia atual: mante-lo instalado e apenas MATAR o processo (am force-stop) enquanto
-        // o cluster projetado esta visivel (ver reclaimCluster -> stopNativeClusterProvider). Isso
-        // garante que o volante nao navegue o cluster nativo por baixo do overlay (nao conseguimos
-        // consumir a tecla, so somos notificados). Ao desativar (long-press voltar) o provedor e
-        // relancado (start normal, nao reinstall), entao re-vincula ao cluster sem reboot e volta
-        // completo.
+        // Ciclo em runtime (ver reclaimCluster / deactivateProjectedCluster):
+        //   - ativar projetado  -> DESINSTALA o multidisplay (force-stop nao basta: o carro o
+        //     relanca sozinho e ele volta a navegar por baixo do overlay);
+        //   - desativar (voltar) -> REINSTALA (pm install-existing) + reinicia o clusterservice
+        //     (am force-stop com.autolink.clusterservice) para forcar o re-scan/re-vinculo, senao
+        //     so o card basico volta e os demais ficam pretos ate um reboot.
         enableSystemApp(NATIVE_CLUSTER_PROVIDER_PACKAGE);
     }
 
