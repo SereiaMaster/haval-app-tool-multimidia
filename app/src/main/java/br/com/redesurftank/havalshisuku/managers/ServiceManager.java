@@ -260,30 +260,31 @@ public class ServiceManager {
     private boolean isClusterHeartbeatRunning = false;
     private volatile boolean clusterHeartbeatPaused = false;
     private volatile boolean clusterNativeCardActive = false;
+    // Controla SE o overlay do projetor deve ser escondido (revelar o cluster nativo).
+    // Desacoplado de clusterHeartbeatPaused: ao desativar, pausamos o heartbeat cedo (para o
+    // carro reassumir e para nao reprojetarmos durante o restart), mas mantemos o overlay
+    // COBRINDO ate a recomposicao do cluster nativo terminar, so entao revelamos.
+    private volatile boolean clusterOverlayReleased = false;
+    // Geracao do restart do subsistema do cluster: incrementa a cada desativar; a thread de
+    // restart so revela o nativo se a sua geracao ainda for a atual (evita reveal obsoleto se
+    // o usuario reativar no meio do restart).
+    private volatile int clusterRestartGeneration = 0;
     private int clusterHeartBeatCount = 0;
     private int clusterCardView = 0;
     private static final int NATIVE_CLUSTER_CARD = 0;
     // Cards do cluster projetado navegaveis via toque curto (exclui o 0 = cluster nativo do carro).
     private static final int[] PROJECTED_CLUSTER_CARDS = new int[] {1, 3};
     private int lastProjectedClusterCard = 1;
-    // Atraso apos entrar no card 0 para aguardar o fade do overlay antes de soltar o
-    // heartbeat (o carro so reassume o cluster nativo depois que paramos o keep-alive).
-    private static final long NATIVE_CARD_HEARTBEAT_RELEASE_DELAY_MS = 700L;
-    // Atraso maior usado quando o desativar precisa reinstalar o provedor nativo + reiniciar o
-    // clusterservice: mantemos o overlay cobrindo por mais tempo para o cluster nativo recompor
-    // antes de revelar, evitando (o maximo possivel) um flash preto durante o reload.
-    private static final long NATIVE_CARD_REINSTALL_RELEASE_DELAY_MS = 2600L;
     // App nativo que renderiza o cluster do carro (cards de dados do celular/conexao etc.).
     // Enquanto o nosso cluster esta ativo ele fica DESINSTALADO (nao so morto): force-stop nao
     // basta porque o carro relanca o multidisplay sozinho e ele volta a navegar por baixo do
-    // overlay. Ao desativar o cluster projetado precisamos reinstala-lo E reiniciar o
-    // clusterservice para o cluster nativo carregar completo (senao so aparece o cluster basico
-    // e o resto fica preto).
+    // overlay. Ao desativar o cluster projetado reinstalamos + fazemos um restart controlado do
+    // subsistema do cluster (multidisplay + clusterservice) para o cluster nativo carregar
+    // completo (senao so aparece o cluster basico e o resto fica preto).
     private static final String NATIVE_CLUSTER_PROVIDER_PACKAGE = "com.beantechs.multidisplay";
     // Servico de sistema que compoe o cluster e vincula o provedor nativo. Reiniciar ele forca
     // um reload/re-scan que re-vincula o multidisplay recem reinstalado sem precisar de reboot.
     private static final String CLUSTER_SERVICE_PACKAGE = "com.autolink.clusterservice";
-    private Runnable clusterNativeReleaseRunnable = null;
     // Garante que o modo do cluster (nativo x projetado) so seja restaurado do disco UMA vez no
     // boot. Reconexoes posteriores (ex.: apos reiniciarmos o clusterservice no desativar) devem
     // respeitar o estado atual em memoria, nao reler do disco.
@@ -1322,13 +1323,19 @@ public class ServiceManager {
             lastProjectedClusterCard = clusterCardView;
         }
         setSyntheticClusterCard(NATIVE_CLUSTER_CARD, "deactivate_projected_back_long");
-        // Reinstala o provedor nativo + reinicia o clusterservice CEDO (ele foi desinstalado ao
-        // ativar). Comeca o reload em paralelo com o fade do overlay para o cluster nativo estar
-        // recomposto quando revelarmos.
-        startNativeClusterProvider();
-        // Usa o delay maior: o overlay cobre ate o reload (reinstall + restart do clusterservice)
-        // provavelmente terminar, minimizando o flash preto ao revelar o cluster nativo.
-        scheduleNativeRelease(NATIVE_CARD_REINSTALL_RELEASE_DELAY_MS);
+        // Entra em modo nativo:
+        //  - clusterNativeCardActive = true: ignora reports do carro (msgId 133/134);
+        //  - clusterHeartbeatPaused = true: para de reenviar heartbeat/android-ready, para o
+        //    carro reassumir e para NAO reprojetarmos durante o restart do subsistema;
+        //  - clusterOverlayReleased = false: mantem o overlay COBRINDO durante o restart (para o
+        //    usuario nao ver a recomposicao/preto); o reveal ocorre so no fim da sequencia.
+        clusterNativeCardActive = true;
+        clusterHeartbeatPaused = true;
+        clusterOverlayReleased = false;
+        int gen = ++clusterRestartGeneration;
+        // Reinstala o provedor nativo e faz o restart controlado do subsistema do cluster; ao
+        // final (se a geracao ainda for a atual) revela o cluster nativo recomposto.
+        restartClusterSubsystemAsync(gen);
     }
 
     private void setSyntheticClusterCard(int nextCard, String reason) {
@@ -1389,6 +1396,7 @@ public class ServiceManager {
         if (lastCard == NATIVE_CLUSTER_CARD) {
             clusterNativeCardActive = true;
             clusterHeartbeatPaused = true;
+            clusterOverlayReleased = true;
             clusterCardView = NATIVE_CLUSTER_CARD;
             lastProjectedClusterCard = PROJECTED_CLUSTER_CARDS[0];
             lastSyntheticClusterCardTarget = NATIVE_CLUSTER_CARD;
@@ -1398,6 +1406,7 @@ public class ServiceManager {
             int card = isProjectedClusterCard(lastCard) ? lastCard : PROJECTED_CLUSTER_CARDS[0];
             clusterNativeCardActive = false;
             clusterHeartbeatPaused = false;
+            clusterOverlayReleased = false;
             clusterCardView = card;
             lastProjectedClusterCard = card;
             lastSyntheticClusterCardTarget = card;
@@ -1410,53 +1419,13 @@ public class ServiceManager {
     }
 
     /**
-     * Entra no modo nativo replicando EXATAMENTE o estado de "flag desligada" (que
-     * comprovadamente devolve o cluster nativo completo e navegavel):
-     *   1) apos o fade do tema (delay), interrompe o keep-alive (heartbeat) — sem enviar
-     *      android-not-ready (75=0), pois isso disparava o "Carregando" nativo e o flag-off
-     *      nao usa; parar o heartbeat ja basta para o carro reassumir;
-     *   2) avisa o projetor (CLUSTER_NATIVE_RELEASE_CHANGED) para ESCONDER o root/WebView
-     *      de verdade (root.isVisible=false), igual ao flag-off. So deixar o HTML do tema
-     *      transparente nao basta: a superficie do Presentation continua composta pelo
-     *      carro e ele pinta os demais cards nativos de preto.
-     * Enquanto neste modo, os reports do carro (msgId 133/134) sao ignorados, entao a
-     * navegacao nativa do carro nao reativa o cluster projetado.
-     */
-    private void scheduleNativeRelease() {
-        scheduleNativeRelease(NATIVE_CARD_HEARTBEAT_RELEASE_DELAY_MS);
-    }
-
-    private void scheduleNativeRelease(long delayMs) {
-        if (backgroundHandler == null) return;
-        if (clusterNativeCardActive) return;
-        clusterNativeCardActive = true;
-        if (clusterNativeReleaseRunnable != null) {
-            backgroundHandler.removeCallbacks(clusterNativeReleaseRunnable);
-        }
-        clusterNativeReleaseRunnable = () -> {
-            clusterNativeReleaseRunnable = null;
-            if (!clusterNativeCardActive) return;
-            clusterHeartbeatPaused = true;
-            // Esconde o overlay do projetor (igual flag-off) para o carro reassumir 100%
-            // do cluster nativo, incluindo os demais cards que ficavam pretos.
-            dispatchServiceManagerEvent(ServiceManagerEventType.CLUSTER_NATIVE_RELEASE_CHANGED);
-            // Quando viemos de um desativar, o provedor nativo ja foi reinstalado + o
-            // clusterservice reiniciado (ver deactivateProjectedCluster/startNativeClusterProvider),
-            // entao ao esconder o overlay o cluster nativo aparece completo. No boot (card 0),
-            // o multidisplay ja esta instalado por ensureSystemApps.
-            Log.w(TAG, "Cluster native card active: released cluster to car (heartbeat paused + overlay hidden after fade)");
-        };
-        backgroundHandler.postDelayed(clusterNativeReleaseRunnable, delayMs);
-    }
-
-    /**
      * Cluster "liberado ao nativo" quando estamos em modo nativo E o heartbeat ja foi
      * pausado (apos o fade). O projetor usa isso para esconder o root/WebView, replicando
      * o estado de flag desligada. Antes do fade (heartbeat ainda ativo) mantemos o overlay
      * para a animacao de saida do tema.
      */
     public boolean isClusterReleasedToNative() {
-        return clusterNativeCardActive && clusterHeartbeatPaused;
+        return clusterOverlayReleased;
     }
 
     /**
@@ -1466,10 +1435,10 @@ public class ServiceManager {
      */
     private void reclaimCluster() {
         clusterNativeCardActive = false;
-        if (backgroundHandler != null && clusterNativeReleaseRunnable != null) {
-            backgroundHandler.removeCallbacks(clusterNativeReleaseRunnable);
-            clusterNativeReleaseRunnable = null;
-        }
+        // Invalida qualquer restart do subsistema em andamento (o reveal daquela geracao sera
+        // ignorado) e reexibe o overlay imediatamente.
+        clusterRestartGeneration++;
+        clusterOverlayReleased = false;
         clusterHeartbeatPaused = false;
         // Reanuncia android-ready (75=1) imediatamente. Nao dependemos apenas do
         // startClusterHeartbeat porque, se o loop do heartbeat ainda nao tiver se
@@ -1520,37 +1489,84 @@ public class ServiceManager {
     }
 
     /**
-     * Ao liberar a regiao para o carro (long-press voltar), REINSTALA o provedor nativo e
-     * FORCA um reload do cluster reiniciando o clusterservice.
+     * Restart controlado (agressivo) do subsistema do cluster ao desativar o projetado. Roda numa
+     * thread dedicada (nao bloqueia input/heartbeat) com esperas entre os passos e revela o
+     * cluster nativo so no fim. Instrumentado com logs (saida de cada comando) para diagnostico.
      *
-     * Por que reiniciar o clusterservice: o cluster nativo e composto por
-     * com.autolink.clusterservice (processo separado), que vincula o multidisplay para
-     * desenhar os cards. Quando desinstalamos o multidisplay, esse vinculo fica stale; um
-     * simples pm install-existing (ou relancar via monkey) nao faz o clusterservice
-     * re-escanear -> so o card basico voltava e os demais (celular/conexao/nav) ficavam
-     * pretos ate um reboot. Reiniciando o clusterservice ele recompoe o cluster do zero e
-     * re-vincula o multidisplay recem reinstalado, sem reboot.
-     *
-     * Obs: o nosso proprio bind ao clusterservice cai (onServiceDisconnected -> clusterService
-     * = null) e reconecta sozinho via BIND_AUTO_CREATE, re-registrando o callback. Como
-     * estamos indo para o modo nativo, nao precisamos projetar nesse intervalo.
+     * O cluster nativo e composto por com.autolink.clusterservice + com.beantechs.multidisplay.
+     * Quando desinstalamos o multidisplay (para o volante nao navegar por baixo), o vinculo com o
+     * clusterservice fica stale; reinstalar + so reiniciar o clusterservice nao bastou. Aqui
+     * reinstalamos o provedor e reiniciamos AMBOS os processos, em ordem, dando tempo para
+     * recompor, e so entao escondemos o overlay.
      */
-    private void startNativeClusterProvider() {
-        if (backgroundHandler == null) {
-            reinstallAndReloadNativeClusterProviderBlocking();
-            return;
-        }
-        backgroundHandler.post(this::reinstallAndReloadNativeClusterProviderBlocking);
+    private void restartClusterSubsystemAsync(int generation) {
+        Thread t = new Thread(() -> restartClusterSubsystemBlocking(generation), "cluster-subsystem-restart");
+        t.setDaemon(true);
+        t.start();
     }
 
-    private void reinstallAndReloadNativeClusterProviderBlocking() {
+    private void restartClusterSubsystemBlocking(int generation) {
         try {
-            ShizukuUtils.runCommandAndGetOutput(new String[]{"pm", "install-existing", NATIVE_CLUSTER_PROVIDER_PACKAGE});
-            // Forca o reload: reiniciar o servico de cluster re-escaneia/re-vincula o provedor.
-            ShizukuUtils.runCommandAndGetOutput(new String[]{"am", "force-stop", CLUSTER_SERVICE_PACKAGE});
-            Log.w(TAG, "Native cluster provider reinstalled + clusterservice restarted (reload forced)");
+            logPersistentClusterEvent("cluster_restart_begin", "gen=" + generation);
+            // 1) Reinstala o provedor nativo (foi desinstalado ao ativar o projetado).
+            String outInstall = ShizukuUtils.runCommandAndGetOutput(
+                    new String[]{"pm", "install-existing", NATIVE_CLUSTER_PROVIDER_PACKAGE});
+            Log.w(TAG, "[cluster-restart] install-existing multidisplay -> " + outInstall);
+            logPersistentClusterEvent("cluster_restart_install", outInstall);
+            SystemClock.sleep(800);
+
+            // 2) Restart controlado: derruba o provedor e o compositor do cluster, em ordem. O
+            //    sistema (e o nosso BIND_AUTO_CREATE) relanca o clusterservice; o clusterservice
+            //    relanca/rebinda o multidisplay recem reinstalado.
+            String outStopMd = ShizukuUtils.runCommandAndGetOutput(
+                    new String[]{"am", "force-stop", NATIVE_CLUSTER_PROVIDER_PACKAGE});
+            Log.w(TAG, "[cluster-restart] force-stop multidisplay -> " + outStopMd);
+            String outStopCs = ShizukuUtils.runCommandAndGetOutput(
+                    new String[]{"am", "force-stop", CLUSTER_SERVICE_PACKAGE});
+            Log.w(TAG, "[cluster-restart] force-stop clusterservice -> " + outStopCs);
+            logPersistentClusterEvent("cluster_restart_forcestop",
+                    "multidisplay=" + outStopMd + " clusterservice=" + outStopCs);
+            SystemClock.sleep(1500);
+
+            // 3) Cutuca o relance do provedor (best-effort) caso o clusterservice nao o faca so.
+            String outLaunch = ShizukuUtils.runCommandAndGetOutput(new String[]{
+                    "monkey", "-p", NATIVE_CLUSTER_PROVIDER_PACKAGE,
+                    "-c", "android.intent.category.LAUNCHER", "1"});
+            Log.w(TAG, "[cluster-restart] monkey launch multidisplay -> " + outLaunch);
+            logPersistentClusterEvent("cluster_restart_launch", outLaunch);
+
+            // 4) Aguarda a recomposicao do cluster nativo antes de revelar (evita flash preto).
+            SystemClock.sleep(2500);
+
+            // 5) Reveal: so se esta geracao ainda for a atual (usuario nao reativou no meio).
+            if (generation != clusterRestartGeneration || !clusterNativeCardActive) {
+                logPersistentClusterEvent("cluster_restart_reveal_skipped",
+                        "gen=" + generation + " current=" + clusterRestartGeneration
+                                + " nativeActive=" + clusterNativeCardActive);
+                Log.w(TAG, "[cluster-restart] reveal skipped (stale generation or reactivated)");
+                return;
+            }
+            revealNativeCluster();
+            logPersistentClusterEvent("cluster_restart_reveal", "gen=" + generation);
+            Log.w(TAG, "[cluster-restart] native cluster revealed (overlay hidden)");
         } catch (Exception e) {
-            Log.e(TAG, "Error reinstalling/reloading native cluster provider", e);
+            Log.e(TAG, "Error restarting cluster subsystem", e);
+            logPersistentClusterEvent("cluster_restart_error", String.valueOf(e.getMessage()));
+        }
+    }
+
+    /**
+     * Esconde o overlay do projetor para revelar o cluster nativo ja recomposto. Chamado no fim
+     * do restart do subsistema (thread dedicada), entao despacha o evento no background handler.
+     */
+    private void revealNativeCluster() {
+        clusterOverlayReleased = true;
+        Runnable dispatch = () -> dispatchServiceManagerEvent(
+                ServiceManagerEventType.CLUSTER_NATIVE_RELEASE_CHANGED);
+        if (backgroundHandler != null) {
+            backgroundHandler.post(dispatch);
+        } else {
+            dispatch.run();
         }
     }
 
