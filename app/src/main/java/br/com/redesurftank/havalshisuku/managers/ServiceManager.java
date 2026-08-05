@@ -282,9 +282,6 @@ public class ServiceManager {
     // subsistema do cluster (multidisplay + clusterservice) para o cluster nativo carregar
     // completo (senao so aparece o cluster basico e o resto fica preto).
     private static final String NATIVE_CLUSTER_PROVIDER_PACKAGE = "com.beantechs.multidisplay";
-    // Servico de sistema que compoe o cluster e vincula o provedor nativo. Reiniciar ele forca
-    // um reload/re-scan que re-vincula o multidisplay recem reinstalado sem precisar de reboot.
-    private static final String CLUSTER_SERVICE_PACKAGE = "com.autolink.clusterservice";
     // Garante que o modo do cluster (nativo x projetado) so seja restaurado do disco UMA vez no
     // boot. Reconexoes posteriores (ex.: apos reiniciarmos o clusterservice no desativar) devem
     // respeitar o estado atual em memoria, nao reler do disco.
@@ -1453,51 +1450,53 @@ public class ServiceManager {
         }
         // Reexibe o overlay do projetor (desfaz o hide do release nativo).
         dispatchServiceManagerEvent(ServiceManagerEventType.CLUSTER_NATIVE_RELEASE_CHANGED);
-        // DESINSTALA o provedor nativo do cluster enquanto o projetado estiver visivel. O nosso
-        // listener de teclas e apenas notificacao (dispatchKeyEvent retorna void), entao NAO
-        // conseguimos consumir/bloquear a tecla do volante para o provedor nativo. Um force-stop
-        // nao segura (o carro relanca o multidisplay sozinho), entao desinstalamos de vez para o
-        // volante nao navegar o cluster nativo por baixo do overlay. Ao desativar reinstalamos +
-        // reiniciamos o clusterservice para recompor o cluster nativo completo.
+        // DESABILITA o provedor nativo do cluster (pm disable-user) enquanto o projetado estiver
+        // visivel. O nosso listener de teclas e apenas notificacao (dispatchKeyEvent retorna
+        // void), entao NAO conseguimos consumir/bloquear a tecla do volante. Um force-stop nao
+        // segura (o carro relanca o multidisplay sozinho); desabilitar impede o carro de relanca-
+        // lo -> sem interferencia. Diferente do uninstall, o pacote permanece instalado, entao o
+        // pm enable ao desativar re-vincula o cluster nativo em runtime, sem reboot.
         stopNativeClusterProvider();
-        Log.w(TAG, "Cluster reclaimed for Android (android-ready re-sent, heartbeat resumed, overlay restored, native provider uninstalled)");
+        Log.w(TAG, "Cluster reclaimed for Android (android-ready re-sent, heartbeat resumed, overlay restored, native provider disabled)");
     }
 
     /**
-     * DESINSTALA o provedor nativo do cluster (com.beantechs.multidisplay) ao ativar o cluster
-     * projetado. Nao basta um force-stop: o carro relanca o multidisplay sozinho e ele volta a
-     * navegar por baixo do overlay (o nosso listener de teclas e apenas notificacao, nao
-     * conseguimos consumir a tecla). Desinstalar remove ele de vez -> zero interferencia. Roda
-     * em background para nao travar a thread de input.
+     * DESABILITA o provedor nativo do cluster (com.beantechs.multidisplay) ao ativar o cluster
+     * projetado — em vez de desinstalar. Um force-stop sozinho nao segura (o carro relanca o
+     * multidisplay e ele volta a navegar por baixo do overlay; o nosso listener de teclas e
+     * apenas notificacao, nao conseguimos consumir a tecla). O uninstall segurava, mas quebrava
+     * o re-vinculo ao clusterservice (so voltava com reboot). Com pm disable-user o pacote
+     * PERMANECE instalado (o carro nao consegue relanca-lo -> zero interferencia) e o pm enable
+     * ao desativar restaura o vinculo em runtime, sem reboot. Roda em background para nao travar
+     * a thread de input.
      */
     private void stopNativeClusterProvider() {
         if (backgroundHandler == null) {
-            uninstallNativeClusterProviderBlocking();
+            disableNativeClusterProviderBlocking();
             return;
         }
-        backgroundHandler.post(this::uninstallNativeClusterProviderBlocking);
+        backgroundHandler.post(this::disableNativeClusterProviderBlocking);
     }
 
-    private void uninstallNativeClusterProviderBlocking() {
+    private void disableNativeClusterProviderBlocking() {
         try {
-            ShizukuUtils.runCommandAndGetOutput(new String[]{"pm", "uninstall", "--user", "0", NATIVE_CLUSTER_PROVIDER_PACKAGE});
-            ShizukuUtils.runCommandAndGetOutput(new String[]{"pkill", "-9", "-f", NATIVE_CLUSTER_PROVIDER_PACKAGE});
-            Log.w(TAG, "Native cluster provider uninstalled (projected active)");
+            String out = ShizukuUtils.runCommandAndGetOutput(new String[]{"pm", "disable-user", "--user", "0", NATIVE_CLUSTER_PROVIDER_PACKAGE});
+            ShizukuUtils.runCommandAndGetOutput(new String[]{"am", "force-stop", NATIVE_CLUSTER_PROVIDER_PACKAGE});
+            Log.w(TAG, "Native cluster provider disabled (projected active) -> " + out);
+            logPersistentClusterEvent("cluster_provider_disabled", out);
         } catch (Exception e) {
-            Log.e(TAG, "Error uninstalling native cluster provider", e);
+            Log.e(TAG, "Error disabling native cluster provider", e);
         }
     }
 
     /**
-     * Restart controlado (agressivo) do subsistema do cluster ao desativar o projetado. Roda numa
-     * thread dedicada (nao bloqueia input/heartbeat) com esperas entre os passos e revela o
-     * cluster nativo so no fim. Instrumentado com logs (saida de cada comando) para diagnostico.
+     * Ao desativar o projetado, REABILITA o provedor nativo (pm enable) e revela o cluster nativo
+     * so depois de dar tempo para o carro relanca-lo/recompor. Roda numa thread dedicada (nao
+     * bloqueia input/heartbeat) e e instrumentado com logs para diagnostico.
      *
-     * O cluster nativo e composto por com.autolink.clusterservice + com.beantechs.multidisplay.
-     * Quando desinstalamos o multidisplay (para o volante nao navegar por baixo), o vinculo com o
-     * clusterservice fica stale; reinstalar + so reiniciar o clusterservice nao bastou. Aqui
-     * reinstalamos o provedor e reiniciamos AMBOS os processos, em ordem, dando tempo para
-     * recompor, e so entao escondemos o overlay.
+     * Como o provedor ficou apenas DESABILITADO (nao desinstalado), o pacote permaneceu no
+     * sistema e o pm enable tende a restaurar o vinculo ao clusterservice em runtime, sem reboot
+     * — diferente do uninstall/reinstall, que exigia reboot para re-vincular.
      */
     private void restartClusterSubsystemAsync(int generation) {
         Thread t = new Thread(() -> restartClusterSubsystemBlocking(generation), "cluster-subsystem-restart");
@@ -1508,37 +1507,25 @@ public class ServiceManager {
     private void restartClusterSubsystemBlocking(int generation) {
         try {
             logPersistentClusterEvent("cluster_restart_begin", "gen=" + generation);
-            // 1) Reinstala o provedor nativo (foi desinstalado ao ativar o projetado).
-            String outInstall = ShizukuUtils.runCommandAndGetOutput(
-                    new String[]{"pm", "install-existing", NATIVE_CLUSTER_PROVIDER_PACKAGE});
-            Log.w(TAG, "[cluster-restart] install-existing multidisplay -> " + outInstall);
-            logPersistentClusterEvent("cluster_restart_install", outInstall);
-            SystemClock.sleep(800);
+            // 1) Reabilita o provedor nativo (foi desabilitado ao ativar o projetado). O carro
+            //    volta a poder relanca-lo e o clusterservice re-vincula (pacote nunca saiu).
+            String outEnable = ShizukuUtils.runCommandAndGetOutput(
+                    new String[]{"pm", "enable", NATIVE_CLUSTER_PROVIDER_PACKAGE});
+            Log.w(TAG, "[cluster-restart] enable multidisplay -> " + outEnable);
+            logPersistentClusterEvent("cluster_restart_enable", outEnable);
+            SystemClock.sleep(1000);
 
-            // 2) Restart controlado: derruba o provedor e o compositor do cluster, em ordem. O
-            //    sistema (e o nosso BIND_AUTO_CREATE) relanca o clusterservice; o clusterservice
-            //    relanca/rebinda o multidisplay recem reinstalado.
-            String outStopMd = ShizukuUtils.runCommandAndGetOutput(
-                    new String[]{"am", "force-stop", NATIVE_CLUSTER_PROVIDER_PACKAGE});
-            Log.w(TAG, "[cluster-restart] force-stop multidisplay -> " + outStopMd);
-            String outStopCs = ShizukuUtils.runCommandAndGetOutput(
-                    new String[]{"am", "force-stop", CLUSTER_SERVICE_PACKAGE});
-            Log.w(TAG, "[cluster-restart] force-stop clusterservice -> " + outStopCs);
-            logPersistentClusterEvent("cluster_restart_forcestop",
-                    "multidisplay=" + outStopMd + " clusterservice=" + outStopCs);
-            SystemClock.sleep(1500);
-
-            // 3) Cutuca o relance do provedor (best-effort) caso o clusterservice nao o faca so.
+            // 2) Cutuca o relance do provedor (best-effort) caso o carro nao o faca sozinho.
             String outLaunch = ShizukuUtils.runCommandAndGetOutput(new String[]{
                     "monkey", "-p", NATIVE_CLUSTER_PROVIDER_PACKAGE,
                     "-c", "android.intent.category.LAUNCHER", "1"});
             Log.w(TAG, "[cluster-restart] monkey launch multidisplay -> " + outLaunch);
             logPersistentClusterEvent("cluster_restart_launch", outLaunch);
 
-            // 4) Aguarda a recomposicao do cluster nativo antes de revelar (evita flash preto).
+            // 3) Aguarda a recomposicao do cluster nativo antes de revelar (evita flash preto).
             SystemClock.sleep(2500);
 
-            // 5) Reveal: so se esta geracao ainda for a atual (usuario nao reativou no meio).
+            // 4) Reveal: so se esta geracao ainda for a atual (usuario nao reativou no meio).
             if (generation != clusterRestartGeneration || !clusterNativeCardActive) {
                 logPersistentClusterEvent("cluster_restart_reveal_skipped",
                         "gen=" + generation + " current=" + clusterRestartGeneration
@@ -1550,7 +1537,7 @@ public class ServiceManager {
             logPersistentClusterEvent("cluster_restart_reveal", "gen=" + generation);
             Log.w(TAG, "[cluster-restart] native cluster revealed (overlay hidden)");
         } catch (Exception e) {
-            Log.e(TAG, "Error restarting cluster subsystem", e);
+            Log.e(TAG, "Error re-enabling cluster provider", e);
             logPersistentClusterEvent("cluster_restart_error", String.valueOf(e.getMessage()));
         }
     }
@@ -3106,16 +3093,21 @@ public class ServiceManager {
     }
 
     public void ensureSystemApps() {
-        // No boot garantimos o provedor nativo do cluster (com.beantechs.multidisplay) INSTALADO,
-        // para o cluster nativo funcionar quando nao estamos projetando (card 0).
+        // Provedor nativo do cluster (com.beantechs.multidisplay): garante no boot que esteja
+        // INSTALADO e HABILITADO (uma sessao anterior pode te-lo deixado desabilitado — ver ciclo
+        // abaixo). Assim o cluster nativo funciona quando nao estamos projetando (card 0).
         //
         // Ciclo em runtime (ver reclaimCluster / deactivateProjectedCluster):
-        //   - ativar projetado  -> DESINSTALA o multidisplay (force-stop nao basta: o carro o
-        //     relanca sozinho e ele volta a navegar por baixo do overlay);
-        //   - desativar (voltar) -> REINSTALA (pm install-existing) + reinicia o clusterservice
-        //     (am force-stop com.autolink.clusterservice) para forcar o re-scan/re-vinculo, senao
-        //     so o card basico volta e os demais ficam pretos ate um reboot.
-        enableSystemApp(NATIVE_CLUSTER_PROVIDER_PACKAGE);
+        //   - ativar projetado  -> DESABILITA (pm disable-user) o multidisplay: o pacote fica
+        //     instalado mas o carro nao consegue relanca-lo -> sem interferencia do volante;
+        //   - desativar (voltar) -> REABILITA (pm enable) + relanca; como o pacote nunca saiu do
+        //     sistema, re-vincula ao clusterservice em runtime, sem reboot.
+        enableSystemApp(NATIVE_CLUSTER_PROVIDER_PACKAGE); // install-existing: caso versao antiga tenha desinstalado
+        try {
+            ShizukuUtils.runCommandAndGetOutput(new String[]{"pm", "enable", NATIVE_CLUSTER_PROVIDER_PACKAGE});
+        } catch (Exception e) {
+            Log.e(TAG, "Error enabling native cluster provider on boot", e);
+        }
     }
 
     public void disableSystemApp(String packageName) {

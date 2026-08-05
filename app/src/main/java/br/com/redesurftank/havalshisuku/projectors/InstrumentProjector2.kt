@@ -1301,6 +1301,23 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
                                             // Discard all stale, redundant telemetry updates queued during page load
                                             pendingJsQueues.remove(wv)
 
+                                            // Sincroniza o card atual a partir do ServiceManager ANTES de empurrar o
+                                            // estado para a WebView. No boot, o restoreClusterModeOnBoot restaura o
+                                            // ultimo card (menu/AC) no ServiceManager, mas o evento CLUSTER_CARD_CHANGED
+                                            // pode ter sido disparado antes da WebView carregar/do listener registrar,
+                                            // deixando currentCard=0 (native pass-through) -> como o multidisplay fica
+                                            // desabilitado no modo projetado, o card 0 aparece PRETO. Ler o card atual
+                                            // aqui garante que a WebView carregue exatamente no ultimo card exibido.
+                                            val restoredCard = ServiceManager.getInstance().clusterCardView
+                                            if (restoredCard != currentCard) {
+                                                Log.w(
+                                                        TAG,
+                                                        "Syncing initial card from ServiceManager on page finished: $currentCard -> $restoredCard"
+                                                )
+                                                currentCard = restoredCard
+                                                updateKnownScreenForCard(restoredCard)
+                                            }
+
                                             // Perform a single, consolidated, full-state synchronization
                                             // using the latest car metrics to guarantee perfect UI consistency.
                                             updateValuesWebView()
