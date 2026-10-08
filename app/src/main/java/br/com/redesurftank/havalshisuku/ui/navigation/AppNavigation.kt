@@ -154,6 +154,7 @@ fun MainScreen(modifier: Modifier = Modifier) {
                 when (currentItem?.title) {
                     "Configurações" -> BasicSettingsTab()
                     "Telas" -> TelasTab()
+                    "Luz Ambiente" -> AmbientTestTab()
                     "Valores Atuais" -> CurrentValuesTab()
                     "Instalar Apps" -> InstallAppsTab()
                     "Recursos" -> FeaturesHubScreen()
