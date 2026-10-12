@@ -100,7 +100,14 @@ jobs:
             EXTRA_FLAGS="--prerelease"
           fi
 
+          # --target fixa a tag no commit que acabou de ser buildado. Sem isso o gh
+          # ancora a tag no HEAD do branch default (master), que no fork fica parado
+          # num commit antigo -> created_at do release fica no passado e o release
+          # afunda na listagem da API (/releases ordena por created_at), fazendo o
+          # atualizador do carro nao encontrar a versao nova. Ver memoria
+          # haval-ota-self-hosted-releases.
           gh release create v${{ steps.version.outputs.new_version }} \
+            --target "$GITHUB_SHA" \
             --title "Release ${{ steps.version.outputs.new_version }}" \
             --notes "Automated release" \
             $EXTRA_FLAGS

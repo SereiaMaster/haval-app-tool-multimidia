@@ -11,8 +11,12 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 object ReleaseUpdateChecker {
+    // per_page=100: a API do GitHub ordena /releases por created_at (= data do commit
+    // que a tag aponta). Se uma tag ficar ancorada num commit antigo, o release afunda
+    // na lista; sem per_page o default e 30 e o release novo pode cair fora da pagina.
+    // Buscando 100 garantimos ver todos e escolher a MAIOR versao (compareVersions).
     private const val RELEASES_URL =
-            "https://api.github.com/repos/SereiaMaster/haval-app-tool-multimidia/releases"
+            "https://api.github.com/repos/SereiaMaster/haval-app-tool-multimidia/releases?per_page=100"
 
     suspend fun getAllReleaseInfo(): UpdateCheckResult {
         return withContext(Dispatchers.IO) {
