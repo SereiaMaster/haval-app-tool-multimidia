@@ -693,11 +693,6 @@ public class ForegroundService extends Service implements Shizuku.OnBinderDeadLi
         }
         startCarPlaySystemUiIconWatchdogSafely("post-service-init");
         try {
-            br.com.redesurftank.havalshisuku.managers.CompanionAppInstaller.ensureInstalledAsync(getApplicationContext());
-        } catch (Exception e) {
-            Log.e(TAG, "Companion app install scheduling failed: " + e.getMessage(), e);
-        }
-        try {
             DisplayAppLauncher.INSTANCE.startAndroidAutoSteeringMediaFocusKeepAlive();
         } catch (Exception e) {
             Log.e(TAG, "Android Auto steering media focus keepalive scheduling failed: " + e.getMessage(), e);
