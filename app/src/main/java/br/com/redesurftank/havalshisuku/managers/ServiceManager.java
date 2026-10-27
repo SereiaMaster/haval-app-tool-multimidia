@@ -383,6 +383,13 @@ public class ServiceManager {
     // O loop para assim que o rádio liga, então tentativas extras são de graça p/ o BT (rápido).
     private static final int RADIO_RESTORE_MAX_ATTEMPTS = 8;
     private static final long STARTUP_REPORT_RECONCILE_DELAY_MS = 6000L;
+    // Quando a central sobe com o carro JA ligado, a transicao off->on de driving_ready nao chega
+    // (listeners so disparam em MUDANCA) e, nos primeiros segundos deste OEM, a leitura forcada de
+    // driving_ready volta null -> a reconciliacao caia em "ready_state_unknown" e desistia na
+    // primeira tentativa, deixando BT/hotspot sem religar. Estas tentativas extras releem o estado
+    // ate ficar conhecido. 1a aos 6s + ate 7 x 5s ~= 41s cobre o boot deste OEM.
+    private static final long STARTUP_REPORT_RECONCILE_RETRY_MS = 5000L;
+    private static final int STARTUP_REPORT_RECONCILE_MAX_ATTEMPTS = 8;
     private CarInfo carInfo;
     private volatile IIntelligentVehicleControlService controlService;
     // ===== Canal de controle resiliente =====
@@ -3742,24 +3749,29 @@ public class ServiceManager {
     }
 
     private void scheduleStartupReportReconciliations() {
+        scheduleStartupReportReconcileAttempt(0, STARTUP_REPORT_RECONCILE_DELAY_MS);
+    }
+
+    private void scheduleStartupReportReconcileAttempt(int attempt, long delayMs) {
         if (backgroundHandler == null) return;
         backgroundHandler.postDelayed(() -> {
             try {
-                reconcileStartupReportState();
+                reconcileStartupReportState(attempt);
             } catch (Exception e) {
                 Log.e(TAG, "Error reconciling startup report state", e);
                 logPersistentClusterEvent(
                         "startup_report_reconcile_failed",
                         persistentEventDetails(
+                                "attempt", attempt,
                                 "error", e.getClass().getSimpleName(),
                                 "message", e.getMessage()
                         )
                 );
             }
-        }, STARTUP_REPORT_RECONCILE_DELAY_MS);
+        }, delayMs);
     }
 
-    private void reconcileStartupReportState() {
+    private void reconcileStartupReportState(int attempt) {
         String readyState = getUpdatedData(CarConstants.CAR_BASIC_DRIVING_READY_STATE.getValue());
         boolean ready = isVehicleReadyStateOn(readyState);
         boolean poweredOff = isVehicleReadyStateOff(readyState);
@@ -3782,6 +3794,7 @@ public class ServiceManager {
         logPersistentClusterEvent(
                 "startup_report_reconcile",
                 persistentEventDetails(
+                        "attempt", attempt,
                         "readyState", readyState,
                         "carPoweredOff", carPoweredOff,
                         "bluetoothPendingRestore", bluetoothPendingRestore,
@@ -3792,13 +3805,41 @@ public class ServiceManager {
         );
 
         if (!ready) {
-            logPersistentClusterEvent(
-                    "startup_report_reconcile_skipped",
-                    persistentEventDetails(
-                            "readyState", readyState,
-                            "reason", poweredOff ? "vehicle_powered_off" : "ready_state_unknown"
-                    )
-            );
+            // Carro confirmado DESLIGADO: nada a reconciliar, nada a religar e NAO reagenda.
+            if (poweredOff) {
+                logPersistentClusterEvent(
+                        "startup_report_reconcile_skipped",
+                        persistentEventDetails(
+                                "attempt", attempt,
+                                "readyState", readyState,
+                                "reason", "vehicle_powered_off"
+                        )
+                );
+                return;
+            }
+            // Estado ainda DESCONHECIDO (leitura null/vazia logo apos o boot). Reagenda a releitura
+            // ate o estado ficar conhecido ou esgotar as tentativas: e aqui que a central que sobe
+            // com o carro ja ligado consegue, enfim, religar o BT/hotspot desligados ao trancar/parar.
+            if (attempt + 1 < STARTUP_REPORT_RECONCILE_MAX_ATTEMPTS) {
+                logPersistentClusterEvent(
+                        "startup_report_reconcile_retry",
+                        persistentEventDetails(
+                                "attempt", attempt,
+                                "readyState", readyState,
+                                "reason", "ready_state_unknown"
+                        )
+                );
+                scheduleStartupReportReconcileAttempt(attempt + 1, STARTUP_REPORT_RECONCILE_RETRY_MS);
+            } else {
+                logPersistentClusterEvent(
+                        "startup_report_reconcile_skipped",
+                        persistentEventDetails(
+                                "attempt", attempt,
+                                "readyState", readyState,
+                                "reason", "ready_state_unknown"
+                        )
+                );
+            }
             return;
         }
 
