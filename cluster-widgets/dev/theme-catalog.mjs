@@ -23,6 +23,7 @@ function listDirectories(parentPath) {
 
 const themeLabOverrides = new Map([
   ['source/v1.0/ApexGT', { keyboard: 'none', telemetry: 'injected' }],
+  ['source/v1.0/apex-storm', { keyboard: 'none', telemetry: 'injected' }],
 ]);
 
 function readTheme(directory, relativeDirectory, kind, preferredEntry) {
