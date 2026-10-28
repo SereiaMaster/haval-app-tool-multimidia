@@ -8,9 +8,9 @@ import org.junit.Test
 
 class ThemeManagerCatalogTest {
     @Test
-    fun `default catalog uses upstream preview contract v1 release branch`() {
+    fun `default catalog uses fork preview contract v1 release branch`() {
         assertEquals(
-            "https://github.com/bobaoapae/haval-app-tool-multimidia/tree/" +
+            "https://github.com/SereiaMaster/haval-app-tool-multimidia/tree/" +
                 "preview/cluster-widgets/Themes/v1.0",
             ThemeManager.THEME_REPO_URL
         )
@@ -19,7 +19,7 @@ class ThemeManagerCatalogTest {
     @Test
     fun `legacy Sport catalog stays separate from contract v1 catalog`() {
         assertEquals(
-            "https://github.com/bobaoapae/haval-app-tool-multimidia/tree/" +
+            "https://github.com/SereiaMaster/haval-app-tool-multimidia/tree/" +
                 "preview/cluster-widgets/Themes",
             ThemeManager.TRUSTED_LEGACY_SPORT_REPO_URL
         )

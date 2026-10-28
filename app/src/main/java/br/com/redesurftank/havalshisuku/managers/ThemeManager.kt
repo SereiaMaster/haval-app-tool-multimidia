@@ -35,10 +35,10 @@ class ThemeManager private constructor(val context: Context) {
 
     companion object {
         private const val TAG = "ThemeManager"
-        /** Audited package catalog published with the stable v301 integration branch. */
-        const val THEME_REPO_URL = "https://github.com/bobaoapae/haval-app-tool-multimidia/tree/preview/cluster-widgets/Themes/v1.0"
+        /** Catalog published from this fork's preview branch (so local themes are picked up directly). */
+        const val THEME_REPO_URL = "https://github.com/SereiaMaster/haval-app-tool-multimidia/tree/preview/cluster-widgets/Themes/v1.0"
         /** Legacy Sport packages stay outside v1.0 and are accepted only through the pinned allowlist below. */
-        const val TRUSTED_LEGACY_SPORT_REPO_URL = "https://github.com/bobaoapae/haval-app-tool-multimidia/tree/preview/cluster-widgets/Themes"
+        const val TRUSTED_LEGACY_SPORT_REPO_URL = "https://github.com/SereiaMaster/haval-app-tool-multimidia/tree/preview/cluster-widgets/Themes"
         const val CURRENT_CONTRACT_VERSION = "v1.0"
 
         private data class TrustedLegacySportMetadata(
@@ -846,7 +846,7 @@ class ThemeManager private constructor(val context: Context) {
                     val fullPath = if (info.path.isNotEmpty()) "${info.path}/${metadata.folderName}" else metadata.folderName
                     "https://api.github.com/repos/${info.owner}/${info.repo}/contents/$fullPath?ref=${info.branch}"
                 } else {
-                    "https://api.github.com/repos/bobaoapae/haval-app-tool-multimidia/contents/cluster-widgets/Themes/v1.0/${metadata.folderName}?ref=preview"
+                    "https://api.github.com/repos/SereiaMaster/haval-app-tool-multimidia/contents/cluster-widgets/Themes/v1.0/${metadata.folderName}?ref=preview"
                 }
 
                 Log.d(TAG, "Downloading theme from API: $apiUrl")
