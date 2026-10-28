@@ -1,0 +1,45 @@
+<theme>
+    <name>Apex Storm</name>
+    <description>Dois mostradores circulares em neon que mudam de cor conforme a velocidade (azul -> vermelho ate 160 km/h), com raios e faiscas reativos a velocidade e aceleracao. Canvas 2D a 30fps, centro transparente para o ADAS nativo.</description>
+    <version>0.1.0</version>
+    <thumbnail>thumbnail.png</thumbnail>
+    <mainFile>app.html</mainFile>
+    <decentralized>true</decentralized>
+    <minBridgeVersion>1.0.1</minBridgeVersion>
+    <contractVersion>v1.0</contractVersion>
+    <configurations>
+        <configuration>
+            <id>storm_intensity</id>
+            <label>Intensidade dos efeitos</label>
+            <type>combo</type>
+            <options>Calmo, Equilibrado, Tempestade</options>
+            <default>Equilibrado</default>
+            <stateVariable>stormIntensity</stateVariable>
+            <group>Efeitos</group>
+        </configuration>
+        <configuration>
+            <id>storm_lightning</id>
+            <label>Raios eletricos</label>
+            <type>boolean</type>
+            <default>true</default>
+            <stateVariable>stormLightning</stateVariable>
+            <group>Efeitos</group>
+        </configuration>
+        <configuration>
+            <id>storm_sparks</id>
+            <label>Faiscas</label>
+            <type>boolean</type>
+            <default>true</default>
+            <stateVariable>stormSparks</stateVariable>
+            <group>Efeitos</group>
+        </configuration>
+        <configuration>
+            <id>storm_saturate_speed</id>
+            <label>Velocidade do tom mais quente (km/h)</label>
+            <type>number</type>
+            <default>160</default>
+            <stateVariable>stormSaturateSpeed</stateVariable>
+            <group>Cor</group>
+        </configuration>
+    </configurations>
+</theme>

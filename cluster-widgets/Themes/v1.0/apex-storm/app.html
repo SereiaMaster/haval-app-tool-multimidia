@@ -1,0 +1,1741 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Apex Storm</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: transparent;
+    overflow: hidden;
+    font-family: "Segoe UI", Roboto, system-ui, sans-serif;
+    color: #eaf4ff;
+  }
+  /* Fixed 1920x720 reference plane. The host renders exactly this; the browser
+     preview scales it to fit via JS transform. */
+  #stage {
+    position: absolute; top: 0; left: 0;
+    width: 1920px; height: 720px;
+    transform-origin: top left;
+    background: transparent;        /* surfaces below paint the dark cluster */
+  }
+
+  /* Opaque cluster surfaces — EXACTLY the geometry the other themes use, so the
+     native ADAS window (x520-1400, y120-650) and the native top band stay clear,
+     and the fuel/battery/odometer/trip readouts sit on a real bottom bar instead
+     of leaking the car's own panel info behind them. */
+  /* Base matches the car's near-black native cluster (same as the other themes)
+     so the opaque side/footer surfaces blend seamlessly into the transparent
+     central ADAS window. The neon glow fades fully to that black BEFORE the ADAS
+     edge (x520 / x1400), so there is no visible seam against the OEM background. */
+  .surface { position: absolute; z-index: 1; pointer-events: none;
+             background: #010305; overflow: hidden; }
+  #surf-left  { left: 0;  top: 110px; width: 520px; height: 610px;
+                background: radial-gradient(360px 420px at 262px 250px, rgba(18,36,60,0.42), rgba(1,3,5,0) 60%), #010305; }
+  #surf-right { right: 0; top: 110px; width: 520px; height: 610px;
+                background: radial-gradient(360px 420px at 258px 250px, rgba(18,36,60,0.42), rgba(1,3,5,0) 60%), #010305; }
+  #surf-footer{ left: 520px; top: 650px; width: 880px; height: 70px; background: #010305; }
+
+  /* SPORT red wash on the side dials (clipped to their panels). */
+  #surf-left::after, #surf-right::after {
+    content: ""; position: absolute; inset: 0; opacity: 0;
+    transition: opacity .45s ease; pointer-events: none;
+    background: radial-gradient(520px 520px at 50% 42%, rgba(255,45,30,0.18), rgba(255,0,0,0) 70%);
+  }
+  #stage.sport-mode #surf-left::after, #stage.sport-mode #surf-right::after { opacity: 1; }
+
+  /* SPORT red bleed — a separate unclipped layer so the glow overflows the footer
+     bar and up into the lower screen (translucent, behind the gauges), like before. */
+  #sport-bleed {
+    position: absolute; left: 0; bottom: 0; width: 1920px; height: 380px;
+    z-index: 1; opacity: 0; transition: opacity .45s ease; pointer-events: none;
+    background:
+      radial-gradient(1500px 360px at 960px 770px, rgba(255,45,30,0.16), rgba(255,0,0,0) 70%),
+      linear-gradient(0deg, rgba(160,12,0,0.10), rgba(255,0,0,0) 88%);
+  }
+  #stage.sport-mode #sport-bleed { opacity: 1; }
+
+  /* Gauges above the surfaces; DOM readouts above the gauges. */
+  .readout, .corner, .panel, #info-rail, #clock, #beast-banner, #rpm-readout { z-index: 4; }
+  /* Center column stays clear for the OEM ADAS / speed-limit / ESP overlays. */
+  #storm { position: absolute; top: 0; left: 0; display: block; z-index: 2; }
+
+  .readout { position: absolute; text-align: center; pointer-events: none; }
+  .readout .big {
+    font-weight: 800; font-size: 80px; line-height: 1; letter-spacing: -3px;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 22px var(--glow, rgba(90,170,255,0.6));
+  }
+  .readout .unit { font-size: 24px; font-weight: 600; opacity: 0.7; letter-spacing: 2px; }
+
+  /* Circles live in the clear side bands, fully outside the center ADAS zone.
+     Numbers sit high in each dial, above the fixed OEM telltale band (y 315-565). */
+  #speed-box { left: 12px;   width: 500px; top: 200px; }
+  #right-box { left: 1408px; width: 500px; top: 200px; }
+  #right-box .big { font-size: 74px; }
+  #right-state { font-size: 23px; font-weight: 700; letter-spacing: 4px; margin-top: 2px;
+                 color: var(--glow, rgba(120,190,255,0.85)); opacity: 0.9; }
+
+  .chip {
+    position: absolute; text-align: center; pointer-events: none;
+    font-weight: 700; letter-spacing: 3px;
+  }
+  #gear { font-size: 54px; font-weight: 800; line-height: 1;
+          text-shadow: 0 0 16px var(--glow, rgba(90,170,255,0.55)); }
+  #drive { font-size: 24px; font-weight: 800; letter-spacing: 3px; }
+  #clock { position: absolute; left: 0; width: 1920px; top: 22px; font-size: 30px; font-weight: 600; opacity: 0.55; }
+
+  /* ---- Telemetry readouts (ApexGT data parity, Apex Storm styling) ---- */
+  .corner { position: absolute; font-weight: 700; font-size: 26px; letter-spacing: 1px;
+            opacity: .82; color: #dbe9ff; text-shadow: 0 0 14px rgba(90,170,255,.45);
+            pointer-events: none; }
+  #out-temp { left: 26px;  top: 16px; text-align: left; }
+  #in-temp  { right: 26px; top: 16px; text-align: right; }
+
+  /* Bottom side panels sit well below the fixed OEM telltale band (y 315-565). */
+  .panel { position: absolute; top: 598px; width: 470px; height: 118px;
+           display: flex; align-items: center; gap: 20px; pointer-events: none; }
+  #left-panel  { left: 18px; }
+  #right-panel { right: 18px; flex-direction: row-reverse; text-align: right; }
+  .metric { flex: 1; }
+  .metric .mlabel { font-size: 15px; font-weight: 800; letter-spacing: 3px; opacity: .55; margin-bottom: 7px; }
+  .metric .mrow { display: flex; gap: 14px; margin-top: 8px; font-size: 20px; font-weight: 700; }
+  #right-panel .mrow { justify-content: flex-end; }
+  .metric .mrow span:nth-child(2) { opacity: .55; }
+  .bar { width: 100%; height: 10px; border-radius: 6px; overflow: hidden;
+         background: rgba(120,150,185,0.16); box-shadow: inset 0 0 0 1px rgba(150,180,210,.12); }
+  .bar > i { display: block; height: 100%; transform-origin: left; transform: scaleX(0);
+             transition: transform .4s ease; }
+  #fuel-fill    { background: linear-gradient(90deg,#ffb347,#ff5a3c); box-shadow: 0 0 12px rgba(255,120,60,.6); }
+  #battery-fill { background: linear-gradient(90deg,#2effb0,#4ad0ff); box-shadow: 0 0 12px rgba(60,255,180,.6); }
+  .phead { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  #propulsion-mode { font-size: 18px; font-weight: 800; letter-spacing: 2px; opacity: .55; }
+
+  /* Spans the footer bar (y650-720) and centers its items vertically within it. */
+  #info-rail { position: absolute; left: 520px; width: 880px; top: 650px; height: 70px;
+               display: flex; justify-content: space-between; align-items: center;
+               pointer-events: none; opacity: .9; }
+  #info-rail .ri { text-align: center; }
+  #info-rail .ri b { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums;
+                     text-shadow: 0 0 14px rgba(90,170,255,.4); }
+  #info-rail .ri em { display: block; font-style: normal; font-size: 14px; font-weight: 700;
+                      letter-spacing: 2px; opacity: .5; margin-top: 2px; }
+
+  #rpm-readout { position: absolute; left: 26px; top: 560px; font-size: 16px; font-weight: 700;
+                 letter-spacing: 1px; opacity: .7; pointer-events: none; }
+  #rpm-readout[hidden] { display: none; }
+
+  #beast-banner {
+    position: absolute; left: 12px; width: 500px; top: 74px; text-align: center;
+    font-weight: 900; font-size: 58px; letter-spacing: 7px;
+    color: #fff; opacity: 0; pointer-events: none; transform: scale(0.5);
+    text-shadow: 0 0 24px rgba(255,70,45,0.95), 0 0 54px rgba(255,0,0,0.6);
+  }
+  #beast-banner.show { animation: beastpop 1.15s ease-out forwards; }
+  @keyframes beastpop {
+    0%   { opacity: 0; transform: scale(0.4) rotate(-7deg); }
+    16%  { opacity: 1; transform: scale(1.18) rotate(3deg); }
+    30%  { transform: scale(1) rotate(0deg); }
+    72%  { opacity: 1; }
+    100% { opacity: 0; transform: scale(1.06); }
+  }
+
+  .hidden-card #stage > *:not(#clock) { opacity: 0; transition: opacity .25s; }
+
+  /* ---- Vehicle menus (ApexGT navigation parity, Apex Storm neon styling) ----
+     Panel sits over the RIGHT dial (same placement as ApexGT and the other
+     themes); only visible on card 1 (MENU) or card 3 (AC). The left dial and the
+     center ADAS window keep running behind. */
+  .apex-menus { position: absolute; left: 1458px; top: 145px; width: 400px; height: 430px;
+    z-index: 6; color: #eaf4ff; font-family: "Segoe UI", Roboto, system-ui, sans-serif;
+    line-height: 1.15; font-variant-numeric: tabular-nums; overflow: hidden; pointer-events: auto;
+    background: linear-gradient(145deg, rgba(8,16,28,0.93), rgba(2,6,12,0.96));
+    border: 1px solid rgba(90,170,255,0.32); border-radius: 14px;
+    box-shadow: 0 0 0 1px rgba(10,20,34,0.6), 0 18px 60px rgba(0,0,0,0.6), 0 0 48px rgba(60,140,255,0.22); }
+  .apex-menus[hidden] { display: none !important; }
+  .apex-menus button { font: inherit; color: inherit; cursor: pointer; border: 0; border-radius: 8px;
+    appearance: none; -webkit-appearance: none; text-align: left; background: transparent; }
+  .apex-menus button:focus-visible { outline: 2px solid #94e3ff; outline-offset: -2px; }
+  .apex-menus [hidden] { display: none !important; }
+  .apex-menu-cards { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden;
+    clip: rect(0,0,0,0); white-space: nowrap; }
+  .apex-menu-heading { height: 54px; display: flex; align-items: center; justify-content: space-between;
+    padding: 0 18px; border-bottom: 1px solid rgba(90,170,255,0.18); }
+  .apex-menu-heading h2 { font-size: 28px; line-height: 1; font-weight: 800; letter-spacing: 1.5px;
+    margin: 0; white-space: nowrap; text-shadow: 0 0 18px rgba(90,170,255,0.5); }
+  .apex-menu-heading > span { font-size: 18px; color: #8fb6d6; letter-spacing: 1px; margin-left: 8px; }
+  .apex-menu-body { height: 336px; overflow: hidden; padding: 12px 12px 0; }
+  .apex-menu-window { display: flex; flex-direction: column; gap: 10px; }
+  .apex-menu-option { display: flex; align-items: center; width: 100%; height: 90px; padding: 10px 15px;
+    background: rgba(10,20,32,0.72); border-left: 3px solid transparent !important; border-radius: 10px; }
+  .apex-menu-option.is-focused { background: linear-gradient(90deg, rgba(26,70,110,0.85), rgba(8,20,32,0.6));
+    border-left-color: #7fd4ff !important; box-shadow: 0 0 22px rgba(70,150,255,0.25); }
+  .apex-menu-option > span { flex: 1; min-width: 0; }
+  .apex-menu-option strong { display: block; font-size: 30px; font-weight: 700; letter-spacing: .5px; white-space: nowrap; }
+  .apex-menu-option small { display: block; font-size: 18px; font-weight: 500; letter-spacing: .2px;
+    color: #93b4cc; margin-top: 4px; white-space: nowrap; }
+  .apex-menu-option .apex-menu-index { font-size: 18px; margin: 0 15px 0 0; color: #5f93b8; }
+  .apex-menu-option.is-focused .apex-menu-index { color: #a9e4ff; }
+  .apex-menu-option > b { font-size: 34px; font-weight: 400; color: #5c93c0; padding-left: 10px; }
+  .apex-menu-option.is-focused > b { color: #bdecff; }
+  .apex-menu-setting small { font-size: 18px; letter-spacing: .8px; margin: 0 0 2px; }
+  .apex-menu-setting strong { font-size: 32px; line-height: 1.05; }
+  .apex-menu-footer { position: absolute; bottom: 0; left: 12px; right: 12px; height: 40px; display: flex;
+    align-items: center; justify-content: center; border-top: 1px solid rgba(90,170,255,0.16);
+    color: #8fb6d6; font-size: 18px; letter-spacing: .3px; white-space: nowrap; }
+  #apex-menu-feedback { color: #a9e0ff; }
+  .apex-menu-tabs { display: flex; gap: 9px; height: 38px; margin-bottom: 12px; }
+  .apex-menu-tabs button { flex: 1; text-align: center; background: transparent; color: #86a6bd;
+    font-size: 21px; font-weight: 700; letter-spacing: 1px; border-radius: 0;
+    border-bottom: 1px solid rgba(90,170,255,0.22); }
+  .apex-menu-tabs button.is-selected { color: #cdefff; border-bottom-color: #7fd4ff;
+    text-shadow: 0 0 16px rgba(90,170,255,0.55); }
+  .apex-menu-stat { padding: 0 5px 8px; margin-bottom: 7px; border-bottom: 1px solid rgba(90,170,255,0.12); }
+  .apex-menu-stat > small, .apex-menu-energy small { display: block; font-size: 17px; letter-spacing: .7px; color: #90b2cb; }
+  .apex-menu-stat > strong { display: block; font-size: 33px; font-weight: 600; line-height: 1.12; margin-top: 2px; white-space: nowrap; }
+  .apex-menu-energy { display: flex; padding: 0 5px; gap: 10px; }
+  .apex-menu-energy > span { width: 50%; min-width: 0; }
+  .apex-menu-energy strong { display: block; font-size: 32px; font-weight: 600; line-height: 1.12; margin: 3px 0 2px; }
+  .apex-menu-energy em { font-size: 23px; font-style: normal; color: #93b4cc; white-space: nowrap; }
+  .apex-menu-tire-caption { font-size: 17px; letter-spacing: 1px; color: #90b2cb; display: flex;
+    justify-content: space-between; padding: 0 5px 6px; }
+  .apex-menu-tires { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .apex-menu-tire { padding: 8px 10px; background: rgba(10,22,34,0.72); border-left: 1px solid rgba(90,170,255,0.4);
+    border-radius: 8px; }
+  .apex-menu-tire small { display: block; font-size: 16px; letter-spacing: .4px; color: #90b2cb; white-space: nowrap; }
+  .apex-menu-tire strong { display: block; font-size: 40px; font-weight: 600; line-height: 1.1; margin-top: 3px; }
+  .apex-menu-graph-reading { height: 56px; display: flex; align-items: baseline; gap: 9px; padding: 0 4px; }
+  .apex-menu-graph-reading strong { font-size: 50px; font-weight: 600; line-height: 1; text-shadow: 0 0 18px rgba(90,170,255,0.45); }
+  .apex-menu-graph-reading > span { font-size: 25px; color: #8fb2c9; }
+  .apex-menu-graph-bars { display: flex; align-items: flex-end; gap: 4px; height: 150px; padding-top: 8px;
+    border-bottom: 1px solid rgba(90,170,255,0.4);
+    background: repeating-linear-gradient(0deg, transparent 0, transparent 46px, rgba(60,130,190,0.18) 46px, rgba(60,130,190,0.18) 47px); }
+  .apex-menu-graph-bars i { display: block; flex: 1; max-height: 100%; height: 2%;
+    background: linear-gradient(0deg, #1766a8, #6fd0ff); border-top: 1px solid #bfeaff; border-radius: 2px; }
+  .apex-menu-graph-bars i.is-empty { background: rgba(40,60,78,0.5); border-top-color: #3c5566; }
+  .apex-menu-graph-bars i.is-regen { background: linear-gradient(0deg, #12806e, #47e0c0); border-top-color: #a8ffe8; }
+  .apex-menu-graph-scale { display: flex; justify-content: space-between; padding-top: 7px; color: #80a3ba;
+    font-size: 16px; letter-spacing: .5px; }
+  .apex-menu-trip-distance { display: flex; align-items: baseline; gap: 9px; height: 54px; padding: 0 5px; white-space: nowrap; }
+  .apex-menu-trip-distance strong { font-size: 46px; font-weight: 600; line-height: 1; text-shadow: 0 0 16px rgba(90,170,255,0.4); }
+  .apex-menu-trip-distance > span { font-size: 25px; color: #90b2cb; }
+  .apex-menu-trip-metrics { margin: 3px 5px 7px; }
+  .apex-menu-trip-metrics > div { display: flex; justify-content: space-between; align-items: baseline;
+    height: 42px; border-bottom: 1px solid rgba(90,170,255,0.14); }
+  .apex-menu-trip-metrics dt { font-size: 17px; letter-spacing: .5px; color: #90b2cb; }
+  .apex-menu-trip-metrics dd { font-size: 28px; font-weight: 600; white-space: nowrap; margin: 0; }
+  .apex-menu-trip-reset { display: block; padding: 4px 5px 0; font-size: 16px; letter-spacing: 1px; color: #96cfe2; }
+  .apex-menu-ac-control { display: flex; align-items: center; justify-content: space-between; width: 100%;
+    height: 86px; background: rgba(10,20,32,0.72); padding: 12px 15px; margin-bottom: 11px;
+    border-left: 3px solid transparent !important; border-radius: 10px; }
+  .apex-menu-ac-control.is-selected { background: linear-gradient(90deg, rgba(26,70,110,0.85), rgba(8,20,32,0.6));
+    border-left-color: #7fd4ff !important; box-shadow: 0 0 22px rgba(70,150,255,0.25); }
+  .apex-menu-ac-control > span { width: 210px; }
+  .apex-menu-ac-control small { display: block; font-size: 19px; letter-spacing: .8px; color: #93b4cc; white-space: nowrap; }
+  .apex-menu-ac-control > strong { font-size: 44px; font-weight: 600; white-space: nowrap; letter-spacing: -.5px; }
+  .apex-menu-temperature-rail { display: block; position: relative; width: 200px; height: 6px;
+    background: rgba(40,60,78,0.8); margin-top: 11px; overflow: hidden; border-radius: 4px; }
+  .apex-menu-temperature-rail > i { display: block; width: 100%; height: 100%;
+    background: linear-gradient(90deg, #60caff, #dff4ff); transform-origin: left center; transform: scaleX(0); }
+  .apex-menu-fan-level { display: flex; width: 200px; gap: 5px; height: 10px; margin-top: 10px; }
+  .apex-menu-fan-level > i { flex: 1; background: rgba(42,60,74,0.9); border-radius: 2px; }
+  .apex-menu-fan-level > i.is-on { background: #86d6ff; box-shadow: 0 0 8px rgba(90,170,255,0.6); }
+  .apex-menu-ac-status { display: flex; gap: 7px; justify-content: space-between; padding: 3px 3px 8px;
+    border-bottom: 1px solid rgba(90,170,255,0.14); }
+  .apex-menu-ac-status small { display: block; color: #7398ad; font-size: 14px; letter-spacing: .8px; margin-bottom: 3px; }
+  .apex-menu-ac-status strong { display: block; font-size: 24px; font-weight: 600; color: #9db8c7; white-space: nowrap; }
+  .apex-menu-ac-status strong.is-on { color: #9ff0ee; }
+  .apex-menu-ac-hold { display: flex; flex-direction: column; gap: 4px; padding: 9px 3px 0; color: #7c9fb3;
+    font-size: 16px; letter-spacing: .3px; }
+  .apex-menu-ac-hold b { font-weight: 700; color: #aed0dd; }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <div id="surf-left" class="surface" aria-hidden="true"></div>
+    <div id="surf-right" class="surface" aria-hidden="true"></div>
+    <div id="surf-footer" class="surface" aria-hidden="true"></div>
+    <div id="sport-bleed" aria-hidden="true"></div>
+    <canvas id="storm" width="1920" height="720" aria-hidden="true"></canvas>
+    <div id="clock" class="chip">--:--</div>
+    <div id="out-temp" class="corner">--</div>
+    <div id="in-temp" class="corner">--</div>
+
+    <div id="speed-box" class="readout">
+      <div class="big" id="speed-value">--</div>
+      <div class="unit">km/h</div>
+    </div>
+    <div id="right-box" class="readout">
+      <div class="big" id="power-value">--</div>
+      <div class="unit">kW</div>
+      <div id="right-state">--</div>
+    </div>
+
+    <div id="rpm-readout" hidden><span id="engine-rpm">--</span> RPM</div>
+
+    <div id="left-panel" class="panel">
+      <div id="gear">--</div>
+      <div class="metric">
+        <div class="mlabel">COMBUSTÍVEL</div>
+        <div class="bar"><i id="fuel-fill"></i></div>
+        <div class="mrow">
+          <span id="fuel-percent">--</span>
+          <span id="fuel-liters">--</span>
+          <span id="fuel-range">-- km</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="right-panel" class="panel">
+      <div class="phead">
+        <span id="drive">--</span>
+        <span id="propulsion-mode">--</span>
+      </div>
+      <div class="metric">
+        <div class="mlabel">BATERIA</div>
+        <div class="bar"><i id="battery-fill"></i></div>
+        <div class="mrow">
+          <span id="battery-percent">--</span>
+          <span id="battery-range">-- km</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="info-rail">
+      <div class="ri"><b id="odometer">--</b><em>km ODÔMETRO</em></div>
+      <div class="ri"><b id="trip-distance">--</b><em>km TRIP</em></div>
+      <div class="ri"><b id="average-consumption">--</b><em><span id="consumption-unit">km/L</span></em></div>
+      <div class="ri"><b id="total-range">--</b><em>km AUTONOMIA</em></div>
+    </div>
+
+    <div id="beast-banner">FERA SOLTA</div>
+
+    <!-- Menu overlay mount (populated by StormMenus; only shown on card 1 / 3). -->
+    <div id="storm-menus"></div>
+  </div>
+
+<script>
+/* ===========================================================================
+   Apex Storm — vehicle menus (full navigation parity with ApexGT, Storm style).
+   Owns only each card's internal navigation; never subscribes or replaces the
+   public bridge hooks. Cards: 0 = PAINEL, 1 = MENU, 3 = AC.
+   =========================================================================== */
+(function () {
+    "use strict";
+
+    var keyFields = {
+        "car.basic.vehicle_speed": "speed",
+        "car.basic.total_odometer": "odometer",
+        "car.basic.inside_temp": "insideTemp",
+        "car.basic.outside_temp": "outsideTemp",
+        "car.configure.default_temp_unit": "tempUnit",
+        "car.basic.remain_fuel_percentage": "fuel",
+        "car.ev_info.cur_battery_power_percentage": "battery",
+        "car.ev_info.fuel_mode_remain_odometer": "fuelRange",
+        "car.ev_info.electric_mode_remain_odometer": "batteryRange",
+        "car.ev_info.power_battery_voltage": "voltage",
+        "car.ev_info.cur_charge_current": "current",
+        "car.basic.cur_journey_odometer": "tripADistance",
+        "car.basic.cur_journey_drivetime": "tripATime",
+        "car.basic.cur_journey_avg_fuel_consume": "tripAConsumption",
+        "car.basic.avg_vehicle_speed_since_startup": "tripASpeed",
+        "car.basic.accumulated_odometer": "tripBDistance",
+        "car.basic.accumulated_drivetime": "tripBTime",
+        "car.basic.avg_fuel_consumption": "tripBConsumption",
+        "car.basic.vehicle_speed_since_reset": "tripBSpeed",
+        "car.basic.tire_pressure_front_left": "tireFL",
+        "car.basic.tire_pressure_front_right": "tireFR",
+        "car.basic.tire_pressure_rear_left": "tireRL",
+        "car.basic.tire_pressure_rear_right": "tireRR",
+        "car.drive_setting.drive_mode": "driveMode",
+        "car.ev_setting.power_model_config": "propulsionMode",
+        "car.drive_setting.steering_wheel_assist_mode": "steerMode",
+        "car.ev_setting.energy_recovery_level": "regenMode",
+        "car.drive_setting.esp_enable": "esp",
+        "car.hvac.power_mode": "acPower",
+        "car.hvac.fan_speed": "acFan",
+        "car.hvac.driver_temperature": "acTemp",
+        "car.hvac.cycle_mode": "acRecycle",
+        "car.hvac.auto_enable": "acAuto"
+    };
+    var aliases = {
+        carSpeed: "speed", odometer: "odometer", inside_temp: "insideTemp", outside_temp: "outsideTemp",
+        tempUnit: "tempUnit", fuelPercent: "fuel", batteryPercent: "battery", fuelRange: "fuelRange",
+        batteryRange: "batteryRange", drivingMode: "driveMode", evMode: "propulsionMode",
+        steerMode: "steerMode", regenMode: "regenMode", espStatus: "esp",
+        tripOdometer: "tripBDistance", tripDriveTime: "tripBTime", tripAvgConsumption: "tripBConsumption",
+        tripAvgSpeed: "tripBSpeed", temp: "acTemp", fan: "acFan", power: "acPower", recycle: "acRecycle", auto: "acAuto"
+    };
+    var labels = {
+        driveMode: { 0: "NORMAL", 1: "SPORT", 2: "ECO", 3: "NEVE", 4: "AREIA", 5: "LAMA", 11: "AWD" },
+        propulsionMode: { 0: "HEV", 1: "EVP", 3: "EV" },
+        steerMode: { 0: "NORMAL", 1: "ESPORTIVA", 2: "CONFORTO" },
+        regenMode: { 0: "NORMAL", 1: "ALTO", 2: "BAIXO" },
+        esp: { 0: "OFF", 1: "ON" }
+    };
+    var menuItems = [
+        { title: "INFORMAÇÕES", subtitle: "Veículo e pneus", view: "info" },
+        { title: "GRÁFICOS", subtitle: "Potência e velocidade", view: "graphs" },
+        { title: "AJUSTES", subtitle: "Preferências do veículo", view: "settings" },
+        { title: "TRIP A / TRIP B", subtitle: "Dados de viagem", view: "trips" }
+    ];
+    var settingItems = [
+        { title: "CONDUÇÃO", field: "driveMode", key: "car.drive_setting.drive_mode", values: [0, 2, 1] },
+        { title: "PROPULSÃO", field: "propulsionMode", key: "car.ev_setting.power_model_config", values: [0, 1, 3] },
+        { title: "DIREÇÃO", field: "steerMode", key: "car.drive_setting.steering_wheel_assist_mode", values: [2, 0, 1] },
+        { title: "REGENERAÇÃO", field: "regenMode", key: "car.ev_setting.energy_recovery_level", values: [2, 0, 1] },
+        { title: "ESTABILIDADE", field: "esp", key: "car.drive_setting.esp_enable", values: [1, 0] }
+    ];
+
+    function numberOrNull(value) {
+        if (typeof value !== "number" && typeof value !== "string") return null;
+        if (typeof value === "string" && !/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(value.trim())) return null;
+        var number = Number(value);
+        return Number.isFinite(number) ? number : null;
+    }
+
+    function normalize(field, value) {
+        if (labels[field]) {
+            var raw = numberOrNull(value);
+            if (raw !== null && Object.prototype.hasOwnProperty.call(labels[field], raw)) return raw;
+            var label = typeof value === "string" ? value.trim().toUpperCase() : "";
+            if (field === "propulsionMode" && /^HEV (?:INTELIGENTE|PRIORIDADE \d+%)$/.test(label)) return 0;
+            if (field === "esp" && (label === "ATIVO" || label === "INATIVO")) return label === "ATIVO" ? 1 : 0;
+            var found = Object.keys(labels[field]).filter(function (key) { return labels[field][key] === label; });
+            return found.length ? Number(found[0]) : null;
+        }
+        if (field === "tempUnit" && (value === "°C" || value === "°F")) return value === "°F" ? 1 : 0;
+        var numeric = numberOrNull(value);
+        if (numeric === null) return null;
+        if (field === "insideTemp" || field === "outsideTemp") return numeric === -1 || numeric === 255 ? null : numeric;
+        if (field === "acTemp") return numeric >= 16 && numeric <= 32 ? numeric : null;
+        if (field === "acFan") return Number.isInteger(numeric) && numeric >= 0 && numeric <= 7 ? numeric : null;
+        if (field === "fuel" || field === "battery") return numeric >= 0 && numeric <= 100 ? numeric : null;
+        if (field === "acPower" || field === "acAuto" || field === "acRecycle" || field === "tempUnit") return numeric === 0 || numeric === 1 ? numeric : null;
+        if (field === "current") return numeric;
+        return numeric >= 0 ? numeric : null;
+    }
+
+    function create(options) {
+        var root = options.root;
+        var mount = options.mount;
+        var disposed = false;
+        var frame = null;
+        var feedbackTimer = null;
+        var feedback = "";
+        var awaiting = null;
+        var card = 0;
+        var menuIndex = 0;
+        var detail = false;
+        var infoIndex = 0;
+        var graphIndex = 0;
+        var settingIndex = 0;
+        var tripIndex = 0;
+        var acFocus = "fan";
+        var lastKeyAt = -Infinity;
+        var seen = Object.create(null);
+        var state = Object.create(null);
+        var history = { speed: [], power: [] };
+        var sampledAt = { speed: -Infinity, power: -Infinity };
+        Object.keys(keyFields).forEach(function (key) { state[keyFields[key]] = null; });
+
+        mount.classList.add("apex-menus");
+        mount.hidden = true;
+        mount.setAttribute("aria-label", "Menus do veículo");
+        mount.innerHTML = [
+            '<nav class="apex-menu-cards" aria-label="Card ativo"><span data-apex-card="0">PAINEL</span><i></i><span data-apex-card="1">MENU</span><i></i><span data-apex-card="3">AC</span></nav>',
+            '<header class="apex-menu-heading"><h2 id="apex-menu-title">MENU PRINCIPAL</h2><span id="apex-menu-counter"></span></header>',
+            '<div class="apex-menu-body">',
+            '<section data-apex-panel="menu" class="apex-menu-window">',
+            menuItems.map(function (item, index) {
+                return '<button type="button" class="apex-menu-option" data-apex-menu="' + index + '"><small class="apex-menu-index">0' + (index + 1) + '</small><span><strong>' + item.title + '</strong><small>' + item.subtitle + '</small></span><b aria-hidden="true">›</b></button>';
+            }).join(""), '</section>',
+            '<section data-apex-panel="settings" class="apex-menu-window" hidden>',
+            settingItems.map(function (item, index) {
+                return '<button type="button" class="apex-menu-option apex-menu-setting" data-apex-setting="' + index + '"><span><small>' + item.title + '</small><strong id="apex-menu-setting-' + item.field + '">--</strong></span><b aria-hidden="true">›</b></button>';
+            }).join(""), '</section>',
+            '<section data-apex-panel="info" hidden><nav class="apex-menu-tabs" aria-label="Informações"><button type="button" data-apex-info="0">GERAL</button><button type="button" data-apex-info="1">PNEUS</button></nav>',
+            '<div id="apex-menu-info-general"><div class="apex-menu-stat"><small>ODÔMETRO</small><strong id="apex-menu-info-odometer">--</strong></div><div class="apex-menu-stat"><small>TEMP. INTERNA · EXTERNA</small><strong id="apex-menu-info-temps">--</strong></div><div class="apex-menu-energy"><span><small>COMBUSTÍVEL</small><strong id="apex-menu-info-fuel">--</strong><em id="apex-menu-info-fuel-range">--</em></span><span><small>BATERIA</small><strong id="apex-menu-info-battery">--</strong><em id="apex-menu-info-battery-range">--</em></span></div></div>',
+            '<div id="apex-menu-info-tires" hidden><div class="apex-menu-tire-caption">PRESSÃO <span>PSI</span></div><div class="apex-menu-tires">',
+            ["FL", "FR", "RL", "RR"].map(function (position, index) {
+                return '<div class="apex-menu-tire"><small>' + ["DIANT. ESQ.", "DIANT. DIR.", "TRAS. ESQ.", "TRAS. DIR."][index] + '</small><strong id="apex-menu-tire-' + position + '">--</strong></div>';
+            }).join(""), '</div></div></section>',
+            '<section data-apex-panel="graphs" hidden><nav class="apex-menu-tabs" aria-label="Gráfico"><button type="button" data-apex-graph="0">POTÊNCIA</button><button type="button" data-apex-graph="1">VELOCIDADE</button></nav><div class="apex-menu-graph-reading"><strong id="apex-menu-graph-value">--</strong><span id="apex-menu-graph-unit">kW</span></div><div id="apex-menu-graph-bars" class="apex-menu-graph-bars" aria-hidden="true">',
+            Array(19).join('<i></i>'), '</div><div class="apex-menu-graph-scale"><span>HISTÓRICO</span><span id="apex-menu-graph-range">−100 / 100 kW</span></div></section>',
+            '<section data-apex-panel="trips" hidden><nav class="apex-menu-tabs" aria-label="Viagem"><button type="button" data-apex-trip="0">TRIP A</button><button type="button" data-apex-trip="1">TRIP B</button></nav><div class="apex-menu-trip-distance"><strong id="apex-menu-trip-distance">--</strong><span>km</span></div><dl class="apex-menu-trip-metrics"><div><dt>TEMPO</dt><dd id="apex-menu-trip-time">--</dd></div><div><dt>VELOC. MÉDIA</dt><dd id="apex-menu-trip-speed">--</dd></div><div><dt>CONSUMO</dt><dd id="apex-menu-trip-consumption">--</dd></div></dl><small id="apex-menu-trip-reset" class="apex-menu-trip-reset">REINÍCIO AUTOMÁTICO</small></section>',
+            '<section data-apex-panel="ac" hidden><button type="button" class="apex-menu-ac-control" data-apex-ac="temp"><span><small>TEMPERATURA</small><span class="apex-menu-temperature-rail" aria-hidden="true"><i id="apex-menu-ac-temp-fill"></i></span></span><strong id="apex-menu-ac-temp">--</strong></button>',
+            '<button type="button" class="apex-menu-ac-control" data-apex-ac="fan"><span><small>VENTILAÇÃO</small><span id="apex-menu-ac-fan-level" class="apex-menu-fan-level" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></span><strong id="apex-menu-ac-fan">--</strong></button>',
+            '<div class="apex-menu-ac-status"><span><small>SISTEMA</small><strong id="apex-menu-ac-power">--</strong></span><span><small>MODO</small><strong id="apex-menu-ac-auto">--</strong></span><span><small>ENTRADA</small><strong id="apex-menu-ac-recycle">--</strong></span></div>',
+            '<div class="apex-menu-ac-hold"><span>Segure <b>OK</b> · Auto</span><span>Segure <b>↩</b> · Recircular</span></div></section></div>',
+            '<footer class="apex-menu-footer"><span id="apex-menu-hint"></span><span id="apex-menu-feedback" role="status" aria-live="polite"></span></footer>'
+        ].join("");
+
+        var elements = Object.create(null);
+        Array.prototype.forEach.call(mount.querySelectorAll("[id]"), function (node) { elements[node.id.replace("apex-menu-", "")] = node; });
+        var panels = Array.prototype.slice.call(mount.querySelectorAll("[data-apex-panel]"));
+        var menuRows = Array.prototype.slice.call(mount.querySelectorAll("[data-apex-menu]"));
+        var settingRows = Array.prototype.slice.call(mount.querySelectorAll("[data-apex-setting]"));
+        var graphBars = Array.prototype.slice.call(elements["graph-bars"].children);
+        var fanBars = Array.prototype.slice.call(elements["ac-fan-level"].children);
+        var tabs = {};
+        ["info", "graph", "trip", "ac", "card"].forEach(function (name) { tabs[name] = Array.prototype.slice.call(mount.querySelectorAll("[data-apex-" + name + "]")); });
+
+        function text(id, value) {
+            var next = String(value);
+            if (elements[id].textContent !== next) elements[id].textContent = next;
+        }
+
+        function number(value, decimals) {
+            return value === null || !Number.isFinite(value) ? "--" : value.toLocaleString("pt-BR", { minimumFractionDigits: decimals || 0, maximumFractionDigits: decimals || 0 });
+        }
+
+        function temperature(value) {
+            return value === null ? "--" : number(value, value % 1 ? 1 : 0) + (state.tempUnit === 1 ? "°F" : "°C");
+        }
+
+        function power() {
+            if (state.voltage === null || state.current === null) return null;
+            var value = state.voltage * state.current / 1000;
+            return Number.isFinite(value) ? value : null;
+        }
+
+        function selectTabs(name, selected) {
+            tabs[name].forEach(function (node) {
+                var active = node.getAttribute("data-apex-" + name) === String(selected);
+                node.classList.toggle("is-selected", active);
+                node.setAttribute(name === "card" ? "aria-current" : "aria-pressed", String(active));
+            });
+        }
+
+        function slidingRows(rows, selected) {
+            var start = Math.max(0, Math.min(rows.length - 3, selected - 1));
+            rows.forEach(function (node, index) {
+                node.hidden = index < start || index >= start + 3;
+                node.classList.toggle("is-focused", index === selected);
+                node.setAttribute("aria-current", String(index === selected));
+            });
+        }
+
+        function renderInfo() {
+            selectTabs("info", infoIndex);
+            elements["info-general"].hidden = infoIndex !== 0;
+            elements["info-tires"].hidden = infoIndex !== 1;
+            text("info-odometer", state.odometer === null ? "--" : number(state.odometer) + " km");
+            text("info-temps", temperature(state.insideTemp) + " · " + temperature(state.outsideTemp));
+            text("info-fuel", state.fuel === null ? "--" : number(Math.min(100, state.fuel)) + "%");
+            text("info-battery", state.battery === null ? "--" : number(Math.min(100, state.battery)) + "%");
+            text("info-fuel-range", state.fuelRange === null ? "--" : number(state.fuelRange) + " km");
+            text("info-battery-range", state.batteryRange === null ? "--" : number(state.batteryRange) + " km");
+            ["FL", "FR", "RL", "RR"].forEach(function (position) {
+                var value = state["tire" + position];
+                text("tire-" + position, value === null || value <= 0 ? "--" : number(value / 6.89476, 1));
+            });
+        }
+
+        function renderGraph() {
+            selectTabs("graph", graphIndex);
+            var metric = graphIndex === 0 ? "power" : "speed";
+            var value = graphIndex === 0 ? power() : state.speed;
+            text("graph-value", number(value, graphIndex === 0 ? 1 : 0));
+            text("graph-unit", graphIndex === 0 ? "kW" : "km/h");
+            text("graph-range", graphIndex === 0 ? "−100 / 100 kW" : "0 / 180 km/h");
+            var samples = history[metric];
+            graphBars.forEach(function (bar, index) {
+                var sampleIndex = index - (18 - samples.length);
+                var sample = sampleIndex >= 0 ? samples[sampleIndex] : null;
+                var ratio = sample === null ? 0 : Math.min(1, Math.abs(sample) / (metric === "speed" ? 180 : 100));
+                var height = Math.max(2, ratio * 100).toFixed(1) + "%";
+                if (bar.style.height !== height) bar.style.height = height;
+                bar.classList.toggle("is-empty", sample === null);
+                bar.classList.toggle("is-regen", metric === "power" && sample !== null && sample < 0);
+            });
+        }
+
+        function renderTrips() {
+            selectTabs("trip", tripIndex);
+            var prefix = tripIndex === 0 ? "tripA" : "tripB";
+            var minutes = state[prefix + "Time"];
+            var duration = minutes === null ? null : Math.round(minutes);
+            var consumption = state[prefix + "Consumption"];
+            text("trip-distance", number(state[prefix + "Distance"], 1));
+            text("trip-time", duration === null ? "--" : Math.floor(duration / 60) + "h " + String(duration % 60).padStart(2, "0") + "min");
+            text("trip-speed", state[prefix + "Speed"] === null ? "--" : number(state[prefix + "Speed"], 1) + " km/h");
+            text("trip-consumption", consumption === null || (consumption > 0 && !Number.isFinite(100 / consumption)) ? "--" : consumption === 0 ? "0,0 L/100 km" : number(100 / consumption, 1) + " km/L");
+            text("trip-reset", tripIndex === 0 ? "REINÍCIO AUTOMÁTICO" : "SEGURE OK PARA ZERAR");
+        }
+
+        function renderAc() {
+            selectTabs("ac", acFocus);
+            var temp = state.acTemp;
+            text("ac-temp", temp === null ? "--" : temp <= 16 ? "LO" : temp >= 32 ? "HI" : temperature(temp));
+            text("ac-fan", state.acPower === null ? "--" : state.acPower === 0 ? "OFF" : number(state.acFan));
+            text("ac-power", state.acPower === null ? "--" : state.acPower === 1 ? "LIGADO" : "DESL.");
+            text("ac-auto", state.acAuto === null ? "--" : state.acAuto === 1 ? "AUTO" : "MANUAL");
+            text("ac-recycle", state.acRecycle === null ? "--" : state.acRecycle === 1 ? "RECIRC." : "EXTERNO");
+            ["power", "auto", "recycle"].forEach(function (name) {
+                var field = "ac" + name.charAt(0).toUpperCase() + name.slice(1);
+                elements["ac-" + name].classList.toggle("is-on", state[field] === 1);
+            });
+            var fill = "scaleX(" + (temp === null ? 0 : (temp - 16) / 16) + ")";
+            if (elements["ac-temp-fill"].style.transform !== fill) elements["ac-temp-fill"].style.transform = fill;
+            fanBars.forEach(function (bar, index) { bar.classList.toggle("is-on", state.acPower === 1 && state.acFan !== null && index < state.acFan); });
+        }
+
+        function render() {
+            frame = null;
+            if (disposed || (card !== 1 && card !== 3)) return;
+            var view = card === 3 ? "ac" : detail ? menuItems[menuIndex].view : "menu";
+            mount.setAttribute("data-view", view);
+            selectTabs("card", card);
+            panels.forEach(function (panel) { panel.hidden = panel.getAttribute("data-apex-panel") !== view; });
+            text("title", card === 3 ? "CLIMATIZAÇÃO" : detail ? menuItems[menuIndex].title : "MENU PRINCIPAL");
+            var index = view === "settings" ? settingIndex : menuIndex;
+            text("counter", view === "menu" || view === "settings" ? (index + 1) + "/" + (view === "menu" ? menuItems.length : settingItems.length) : "");
+            text("hint", view === "ac" ? "↑ ↓ ajustar · OK alternar" : view === "menu" ? "↑ ↓ navegar · OK abrir" : view === "settings" ? "↑ ↓ escolher · OK alterar · ↩" : "↑ ↓ alternar · ↩ voltar");
+            text("feedback", feedback);
+            elements.hint.hidden = Boolean(feedback);
+            elements.feedback.hidden = !feedback;
+            if (view === "menu") slidingRows(menuRows, menuIndex);
+            if (view === "settings") {
+                slidingRows(settingRows, settingIndex);
+                settingItems.forEach(function (item) {
+                    var value = state[item.field] === null ? "--" : labels[item.field][state[item.field]];
+                    text("setting-" + item.field, value);
+                });
+            }
+            if (view === "info") renderInfo();
+            if (view === "graphs") renderGraph();
+            if (view === "trips") renderTrips();
+            if (view === "ac") renderAc();
+        }
+
+        function schedule() {
+            if (!disposed && (card === 1 || card === 3) && frame === null) frame = window.requestAnimationFrame(render);
+        }
+
+        function status(message, expected) {
+            feedback = message;
+            awaiting = expected || null;
+            if (feedbackTimer !== null) window.clearTimeout(feedbackTimer);
+            feedbackTimer = window.setTimeout(function () {
+                feedbackTimer = null;
+                feedback = awaiting ? "AGUARDANDO DADOS" : "";
+                awaiting = null;
+                schedule();
+            }, 2600);
+            schedule();
+        }
+
+        function send(writes, action, expected) {
+            var bridge = window.Android;
+            if (!bridge || (writes.length && typeof bridge.updateCarData !== "function") || (action && typeof bridge.triggerSystemAction !== "function")) {
+                status("AÇÃO INDISPONÍVEL");
+                return;
+            }
+            status(action === "RESET_DRIVE_INFO" ? "ZERAGEM SOLICITADA" : "AGUARDANDO RETORNO", expected);
+            try {
+                if (action) bridge.triggerSystemAction(action);
+                writes.forEach(function (write) { bridge.updateCarData(write[0], String(write[1])); });
+            } catch (error) {
+                status("AÇÃO INDISPONÍVEL");
+            }
+        }
+
+        function known(fields) {
+            var available = fields.every(function (field) { return state[field] !== null; });
+            if (!available) status("AGUARDANDO DADOS");
+            return available;
+        }
+
+        function changeSetting() {
+            var item = settingItems[settingIndex];
+            if (!known([item.field])) return;
+            var next = item.values[(item.values.indexOf(state[item.field]) + 1) % item.values.length];
+            var expected = {};
+            expected[item.field] = next;
+            send([[item.key, next]], null, expected);
+        }
+
+        function acKey(key) {
+            if (key === "ENTER") { acFocus = acFocus === "fan" ? "temp" : "fan"; schedule(); return; }
+            if (key === "BACK_LONG") {
+                if (known(["acRecycle"])) {
+                    var recycle = state.acRecycle === 1 ? 0 : 1;
+                    send([["car.hvac.cycle_mode", recycle]], null, { acRecycle: recycle });
+                }
+                return;
+            }
+            if (key === "ENTER_LONG") {
+                if (known(["acAuto"])) {
+                    var auto = state.acAuto === 1 ? 0 : 1;
+                    send([["car.hvac.auto_enable", auto]], "CANCEL_MAX_AC", { acAuto: auto });
+                }
+                return;
+            }
+            if (key !== "UP" && key !== "DOWN") return;
+            if (acFocus === "temp") {
+                if (!known(["acTemp"])) return;
+                var temp = Math.max(16, Math.min(32, Math.round((state.acTemp + (key === "UP" ? 0.5 : -0.5)) * 2) / 2));
+                if (temp !== state.acTemp) send([["car.hvac.driver_temperature", temp.toFixed(1)]], null, { acTemp: temp });
+                return;
+            }
+            if (!known(["acFan", "acPower"])) return;
+            var fan = state.acPower === 0 ? 0 : state.acFan;
+            var nextFan = Math.max(0, Math.min(7, fan + (key === "UP" ? 1 : -1)));
+            if (fan === nextFan) return;
+            var writes = [];
+            if (nextFan > 0 && state.acPower === 0) writes.push(["car.hvac.power_mode", 1]);
+            if (nextFan === 0) writes.push(["car.hvac.power_mode", 0]);
+            writes.push(["car.hvac.fan_speed", nextFan]);
+            send(writes, null, { acFan: nextFan });
+        }
+
+        function mainKey(key) {
+            var step = key === "UP" ? -1 : key === "DOWN" ? 1 : 0;
+            if (!detail) {
+                if (key === "ENTER") detail = true;
+                if (step) menuIndex = (menuIndex + step + menuItems.length) % menuItems.length;
+                schedule();
+                return;
+            }
+            if (key === "BACK") { detail = false; schedule(); return; }
+            var view = menuItems[menuIndex].view;
+            if (view === "info" && step) infoIndex = 1 - infoIndex;
+            if (view === "graphs" && step) graphIndex = 1 - graphIndex;
+            if (view === "settings") {
+                if (step) settingIndex = (settingIndex + step + settingItems.length) % settingItems.length;
+                if (key === "ENTER") changeSetting();
+            }
+            if (view === "trips") {
+                if (step) tripIndex = 1 - tripIndex;
+                if (key === "ENTER_LONG" && tripIndex === 1) send([], "RESET_DRIVE_INFO", { tripBDistance: 0 });
+            }
+            schedule();
+        }
+
+        function onKeyEvent(keyName) {
+            if (disposed || (card !== 1 && card !== 3)) return;
+            var key = typeof keyName === "string" ? keyName.toUpperCase() : "";
+            if (["UP", "DOWN", "ENTER", "BACK", "ENTER_LONG", "BACK_LONG"].indexOf(key) < 0) return;
+            var now = Date.now();
+            if (now - lastKeyAt < 50) return;
+            lastKeyAt = now;
+            if (card === 3) acKey(key); else mainKey(key);
+        }
+
+        function onCardChanged(value) {
+            var next = numberOrNull(value);
+            if (disposed || [0, 1, 3].indexOf(next) < 0) return;
+            if (next === 1 && card !== 1) detail = false;
+            card = next;
+            mount.hidden = card !== 1 && card !== 3;
+            root.classList.toggle("menu-open", !mount.hidden);
+            root.classList.toggle("card-main", card === 1);
+            root.classList.toggle("card-ac", card === 3);
+            root.classList.toggle("card-native", card === 0);
+            root.setAttribute("data-card-id", String(card));
+            feedback = "";
+            awaiting = null;
+            if (feedbackTimer !== null) { window.clearTimeout(feedbackTimer); feedbackTimer = null; }
+            schedule();
+        }
+
+        function sample(metric, value) {
+            if (value === null) return;
+            var now = Date.now();
+            if (now - sampledAt[metric] < 250 && history[metric].length) history[metric][history[metric].length - 1] = value;
+            else {
+                sampledAt[metric] = now;
+                history[metric].push(value);
+                if (history[metric].length > 18) history[metric].shift();
+            }
+        }
+
+        function update(key, value, allowAliases) {
+            if (disposed) return;
+            var field = keyFields[key] || (allowAliases ? aliases[key] : null);
+            if (!field) return;
+            if (keyFields[key]) seen[field] = true;
+            else if (seen[field]) return;
+            var next = normalize(field, value);
+            if (awaiting && Object.prototype.hasOwnProperty.call(awaiting, field) && awaiting[field] === next) {
+                delete awaiting[field];
+                if (!Object.keys(awaiting).length) {
+                    awaiting = null;
+                    feedback = "";
+                    if (feedbackTimer !== null) { window.clearTimeout(feedbackTimer); feedbackTimer = null; }
+                    schedule();
+                }
+            }
+            if (state[field] === next) return;
+            state[field] = next;
+            if (field === "speed") sample("speed", next);
+            if (field === "voltage" || field === "current") sample("power", power());
+            schedule();
+        }
+
+        function onClick(event) {
+            if (disposed || mount.hidden) return;
+            var button = event.target.closest("button");
+            if (!button || !mount.contains(button)) return;
+            if (card === 1) {
+                if (button.hasAttribute("data-apex-menu")) { menuIndex = Number(button.getAttribute("data-apex-menu")); detail = true; }
+                if (button.hasAttribute("data-apex-setting")) { settingIndex = Number(button.getAttribute("data-apex-setting")); changeSetting(); }
+                ["info", "graph", "trip"].forEach(function (name) {
+                    if (!button.hasAttribute("data-apex-" + name)) return;
+                    var index = Number(button.getAttribute("data-apex-" + name));
+                    if (name === "info") infoIndex = index;
+                    if (name === "graph") graphIndex = index;
+                    if (name === "trip") tripIndex = index;
+                });
+            }
+            if (card === 3 && button.hasAttribute("data-apex-ac")) acFocus = button.getAttribute("data-apex-ac");
+            schedule();
+        }
+
+        function cleanup() {
+            if (disposed) return;
+            disposed = true;
+            if (frame !== null) window.cancelAnimationFrame(frame);
+            if (feedbackTimer !== null) window.clearTimeout(feedbackTimer);
+            frame = null;
+            feedbackTimer = null;
+            awaiting = null;
+            history.speed.length = 0;
+            history.power.length = 0;
+            mount.removeEventListener("click", onClick);
+            mount.hidden = true;
+            root.classList.remove("menu-open", "card-main", "card-ac", "card-native");
+        }
+
+        mount.addEventListener("click", onClick);
+        onCardChanged(0);
+        return { keys: Object.keys(keyFields), update: update, onCardChanged: onCardChanged, onKeyEvent: onKeyEvent, cleanup: cleanup };
+    }
+
+    window.StormMenus = { create: create };
+})();
+</script>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------------------------------------------------------------------------
+  // Fixed geometry (1920 x 720 reference plane). Gauges sit left/right; the
+  // center column is left untouched for the OEM ADAS / speed-limit / ESP layer.
+  // ---------------------------------------------------------------------------
+  var W = 1920, H = 720;
+  // Circles hug the clear side bands so they stay fully clear of the center ADAS
+  // zone (x 520-1400). ncx/ncy = where the number (and the biting maw) sit, kept
+  // high so the number clears the fixed OEM telltale band on the left.
+  var LEFT  = { cx: 262,  cy: 360, r: 196, ncx: 262,  ncy: 242 };   // speedometer
+  var RIGHT = { cx: 1658, cy: 360, r: 196, ncx: 1658, ncy: 242 };   // bipolar power meter
+  var SWEEP = 230;            // degrees of arc used by the scale (wide gap at bottom)
+  var A0 = 155;               // start angle (deg): lower-left; +SWEEP = lower-right
+  var TOP = 270;              // top of the arc (12 o'clock) = power zero point
+  // NOTE: the wide bottom gap keeps the lower arc above the fixed OEM telltales on
+  // the left (READY, placa/traffic-sign, ESP) so the ring never overlaps them.
+  var POWER_MAX = 100;        // kW each way (traction / regen), like Apex GT
+  var FRAME_MS = 1000 / 30;   // 30fps ceiling, same discipline as Apex GT
+  var ACCEL_MAX = 14;         // km/h per second that maps to full excitement
+  var SPARK_POOL = 90;        // hard cap on live particles (pre-allocated)
+
+  // Speed -> color ramp. Cold neon blue at rest, sweeping to hot red at the
+  // configured saturation speed. Reactive: it reverses on its own as speed drops.
+  var RAMP = [
+    [0.00, [ 46, 139, 255]],  // neon blue
+    [0.34, [ 25, 224, 214]],  // cyan
+    [0.60, [122,  60, 255]],  // violet
+    [0.82, [255,  45, 155]],  // magenta
+    [1.00, [255,  59,  46]]   // red
+  ];
+  var REGEN = [60, 255, 170];               // neon green for energy recovery
+
+  var INTENSITY = { Calmo: 0.55, Equilibrado: 1.0, Tempestade: 1.7 };
+
+  // ---------------------------------------------------------------------------
+  // Config (overridable via theme.xml preferences; safe defaults baked in).
+  // ---------------------------------------------------------------------------
+  var cfg = { intensity: "Equilibrado", lightning: true, sparks: true, saturateSpeed: 160 };
+
+  var canvas = document.getElementById("storm");
+  var ctx = canvas.getContext("2d");
+  var stage = document.getElementById("stage");
+  var els = {
+    speed: document.getElementById("speed-value"),
+    power: document.getElementById("power-value"),
+    rightState: document.getElementById("right-state"),
+    gear: document.getElementById("gear"),
+    drive: document.getElementById("drive"),
+    clock: document.getElementById("clock"),
+    speedBox: document.getElementById("speed-box"),
+    rightBox: document.getElementById("right-box"),
+    gearBox: document.getElementById("gear"),
+    banner: document.getElementById("beast-banner"),
+    // Telemetry readouts (ApexGT parity)
+    outTemp: document.getElementById("out-temp"),
+    inTemp: document.getElementById("in-temp"),
+    fuelPercent: document.getElementById("fuel-percent"),
+    fuelLiters: document.getElementById("fuel-liters"),
+    fuelRange: document.getElementById("fuel-range"),
+    fuelFill: document.getElementById("fuel-fill"),
+    batteryPercent: document.getElementById("battery-percent"),
+    batteryRange: document.getElementById("battery-range"),
+    batteryFill: document.getElementById("battery-fill"),
+    odometer: document.getElementById("odometer"),
+    trip: document.getElementById("trip-distance"),
+    consumption: document.getElementById("average-consumption"),
+    consumptionUnit: document.getElementById("consumption-unit"),
+    totalRange: document.getElementById("total-range"),
+    propulsion: document.getElementById("propulsion-mode"),
+    rpmReadout: document.getElementById("rpm-readout"),
+    engineRpm: document.getElementById("engine-rpm")
+  };
+
+  var motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  // ---------------------------------------------------------------------------
+  // Live state + smoothing.
+  // ---------------------------------------------------------------------------
+  var state = {
+    speed: 0, power: 0, gear: "--", drive: "--",
+    voltage: null, current: null,
+    dSpeed: 0, dPower: 0, prevDSpeed: 0,
+    accel: 0, gearFlash: 0, sportMix: 0,
+    // Full ApexGT telemetry set (null = not yet received).
+    rpm: null, odometer: null, propulsion: "--",
+    insideTemp: null, outsideTemp: null, tempUnit: null,
+    fuel: null, battery: null, fuelRange: null, batteryRange: null,
+    trip: null, consumption: null,
+    carPlayInDash: false, projectionMirrorInDash: false,
+    aaClusterInDash: false, projectionPreparingD3: false,
+    card: 1, disposed: false, active: true
+  };
+
+  // Beast Mode: unleashed when drive mode switches to SPORT.
+  var beast = { sport: false, intro: 0, shake: 0, mawOpen: 1, claws: [], waves: [] };
+  var shakeOn = false;
+
+  var sparks = [];
+  for (var i = 0; i < SPARK_POOL; i++) sparks.push({ life: 0 });
+  var lastFrame = 0, raf = 0;
+  var staticLayer = {};
+  // Menu subsystem (card 1 MENU / card 3 AC). Instantiated at bootstrap; the
+  // bridge hooks forward key events / card changes / telemetry to it.
+  var menus = null;
+
+  var GEARS = { "0": "N", "1": "N", "2": "D", "3": "P", "4": "R" };
+  var DRIVES = { "0": "NORMAL", "1": "SPORT", "2": "ECO", "3": "NEVE", "4": "AREIA", "5": "LAMA", "11": "AWD" };
+  var PROPULSION = { "0": "HEV", "1": "EVP", "3": "EV" };
+  var FUEL_TANK_LITERS = 55;
+
+  function rad(d) { return d * Math.PI / 180; }
+  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+
+  function colorFor(t) {
+    t = clamp(t, 0, 1);
+    for (var k = 1; k < RAMP.length; k++) {
+      if (t <= RAMP[k][0]) {
+        var a = RAMP[k - 1], b = RAMP[k];
+        var f = (t - a[0]) / (b[0] - a[0]);
+        return [Math.round(lerp(a[1][0], b[1][0], f)),
+                Math.round(lerp(a[1][1], b[1][1], f)),
+                Math.round(lerp(a[1][2], b[1][2], f))];
+      }
+    }
+    return RAMP[RAMP.length - 1][1].slice();
+  }
+  function rgba(c, a) { return "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + a + ")"; }
+
+  // --- Static layer (track + ticks), rendered once per gauge, then blitted. ---
+  function buildStatic(g) {
+    var c = document.createElement("canvas");
+    c.width = W; c.height = H;
+    var x = c.getContext("2d");
+    x.lineCap = "round";
+    x.strokeStyle = "rgba(120,150,185,0.13)";
+    x.lineWidth = 38;                              // same thickness as the band
+    x.beginPath();
+    x.arc(g.cx, g.cy, g.r, rad(A0), rad(A0 + SWEEP), false);
+    x.stroke();
+    for (var i = 0; i <= 8; i++) {
+      var ang = rad(A0 + (i / 8) * SWEEP);
+      var major = (i % 2 === 0);
+      var ro = g.r + 44, ri = g.r - (major ? 44 : 34);
+      x.strokeStyle = major ? "rgba(195,218,242,0.5)" : "rgba(150,180,210,0.25)";
+      x.lineWidth = major ? 4 : 2;
+      x.beginPath();
+      x.moveTo(g.cx + Math.cos(ang) * ri, g.cy + Math.sin(ang) * ri);
+      x.lineTo(g.cx + Math.cos(ang) * ro, g.cy + Math.sin(ang) * ro);
+      x.stroke();
+    }
+    return c;
+  }
+
+  // --- Thick glowing "tube" band between two angles (gives volume). ---
+  function drawBand(g, a0, a1, anti, color) {
+    function stroke(w, style, comp) {
+      ctx.globalCompositeOperation = comp;
+      ctx.strokeStyle = style; ctx.lineWidth = w; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.arc(g.cx, g.cy, g.r, rad(a0), rad(a1), anti); ctx.stroke();
+    }
+    stroke(38, rgba(color, 0.62), "source-over");  // solid body = volume
+    stroke(96, rgba(color, 0.11), "lighter");       // broad outer bloom
+    stroke(62, rgba(color, 0.22), "lighter");       // outer halo
+    stroke(34, rgba(color, 0.40), "lighter");       // inner halo
+    stroke(16, rgba(color, 0.95), "lighter");       // bright core
+    stroke(4, "rgba(246,251,255,0.98)", "lighter"); // white-hot center line
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  // --- Electric overload running ALONG the whole colored band. ---
+  function arcLightning(g, a0, a1, color, power) {
+    if (power <= 0.05) return;
+    var span = a1 - a0;                              // signed degrees
+    var steps = Math.max(8, Math.round(Math.abs(span) / 10));
+    var filaments = 1 + Math.floor(power * 3.5);     // denser with excitement
+    ctx.globalCompositeOperation = "lighter";
+    ctx.lineCap = "round";
+    for (var fi = 0; fi < filaments; fi++) {
+      var amp = 10 + power * 20;                      // radial wander across the band
+      var tinted = (fi % 2 === 0);
+      ctx.beginPath();
+      for (var s = 0; s <= steps; s++) {
+        var t = s / steps;
+        var ang = rad(a0 + span * t);
+        var edge = (s === 0 || s === steps) ? 0.25 : 1; // settle onto the band at ends
+        var rr = g.r + (Math.random() - 0.5) * 2 * amp * edge;
+        var px = g.cx + Math.cos(ang) * rr;
+        var py = g.cy + Math.sin(ang) * rr;
+        if (s === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.strokeStyle = tinted ? rgba(color, 0.35 * power + 0.1)
+                               : "rgba(235,248,255," + (0.3 + 0.45 * power) + ")";
+      ctx.lineWidth = tinted ? 3 : 1.5;
+      ctx.stroke();
+    }
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  function tipPoint(g, angDeg) {
+    var a = rad(angDeg);
+    return { x: g.cx + Math.cos(a) * g.r, y: g.cy + Math.sin(a) * g.r };
+  }
+  function drawTip(g, angDeg, color) {
+    var p = tipPoint(g, angDeg);
+    ctx.globalCompositeOperation = "lighter";
+    var glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 62);
+    glow.addColorStop(0, "rgba(255,255,255,0.98)");
+    glow.addColorStop(0.28, rgba(color, 0.92));
+    glow.addColorStop(1, rgba(color, 0));
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 62, 0, Math.PI * 2); ctx.fill();
+    ctx.globalCompositeOperation = "source-over";
+    return p;
+  }
+
+  // --- Sparks flung off the tip; emission grows with speed. ---
+  function emitSparks(tip, baseAngDeg, n, color) {
+    var base = rad(baseAngDeg);
+    for (var e = 0; e < n; e++) {
+      var p = null;
+      for (var i = 0; i < sparks.length; i++) { if (sparks[i].life <= 0) { p = sparks[i]; break; } }
+      if (!p) return;                                 // pool exhausted -> drop (cap kept)
+      var dir = base + (Math.random() - 0.5) * 2.4;
+      var spd = 1.6 + Math.random() * 4.2;
+      p.x = tip.x; p.y = tip.y;
+      p.vx = Math.cos(dir) * spd;
+      p.vy = Math.sin(dir) * spd - 1.4;
+      p.life = p.max = 0.45 + Math.random() * 0.4;
+      p.color = color;
+    }
+  }
+  function drawSparks(dt) {
+    ctx.globalCompositeOperation = "lighter";
+    var sec = dt / 1000;
+    for (var i = 0; i < sparks.length; i++) {
+      var p = sparks[i];
+      if (p.life <= 0) continue;
+      p.life -= sec;
+      p.vy += 11 * sec;                               // gravity
+      var nx = p.x + p.vx, ny = p.y + p.vy;
+      var a = clamp(p.life / p.max, 0, 1);
+      ctx.strokeStyle = rgba(p.color, 0.9 * a);
+      ctx.lineWidth = 2.2;
+      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(nx, ny); ctx.stroke();
+      p.x = nx; p.y = ny;
+    }
+    ctx.globalCompositeOperation = "source-over";
+  }
+  function anySpark() { for (var i = 0; i < sparks.length; i++) if (sparks[i].life > 0) return true; return false; }
+
+  // --- SPORT background: red neon pools behind each dial + "warp" speed streaks
+  //     bursting outward on the OUTER side of each gauge (center ADAS stays clear).
+  //     Additive only, no filters; intensity scales with the sport fade + speed. ---
+  function drawSportBackground(mix, now, speedT) {
+    ctx.save();
+    // Keep every SPORT effect inside the side bands; the ADAS window stays clear.
+    ctx.beginPath(); ctx.rect(0, 0, 520, H); ctx.rect(1400, 0, 520, H); ctx.clip();
+    ctx.globalCompositeOperation = "lighter";
+    // Red glow pool behind each dial (fades out before reaching the center column).
+    [LEFT, RIGHT].forEach(function (g) {
+      var pool = ctx.createRadialGradient(g.cx, g.cy, g.r * 0.35, g.cx, g.cy, g.r + 150);
+      pool.addColorStop(0, "rgba(255,55,35,0)");
+      pool.addColorStop(0.55, "rgba(255,48,30," + (0.11 * mix) + ")");
+      pool.addColorStop(1, "rgba(255,30,20,0)");
+      ctx.fillStyle = pool;
+      ctx.beginPath(); ctx.arc(g.cx, g.cy, g.r + 150, 0, Math.PI * 2); ctx.fill();
+    });
+    // Warp streaks: left dial -> left hemisphere, right dial -> right hemisphere.
+    var baseLen = 80 + 220 * speedT;           // longer streaks, visible even parked
+    ctx.lineCap = "round";
+    [[LEFT, 90], [RIGHT, -90]].forEach(function (pair) {
+      var g = pair[0], a0 = pair[1];           // hemisphere facing away from center
+      var n = 17;                               // denser streak fan
+      for (var k = 0; k < n; k++) {
+        var frac = k / (n - 1);
+        var a = rad(a0 + frac * 180);
+        var phase = ((now * 0.0012 * (0.5 + speedT) + k * 0.313) % 1 + 1) % 1;
+        var r0 = g.r + 50 + phase * (90 + 220 * speedT);
+        var len = baseLen * (0.5 + 0.5 * Math.sin(frac * Math.PI));
+        var x0 = g.cx + Math.cos(a) * r0,       y0 = g.cy + Math.sin(a) * r0;
+        var x1 = g.cx + Math.cos(a) * (r0 + len), y1 = g.cy + Math.sin(a) * (r0 + len);
+        // Brighter streaks with a higher floor so they read at any speed, while
+        // the red glow pools behind them are softer than before.
+        var al = 0.5 * mix * (1 - phase) * (0.65 + 0.35 * speedT);
+        var grad = ctx.createLinearGradient(x0, y0, x1, y1);
+        grad.addColorStop(0, "rgba(255,80,55,0)");
+        grad.addColorStop(0.45, "rgba(255,90,60," + al + ")");
+        grad.addColorStop(0.8, "rgba(255,210,190," + (al * 0.9) + ")");
+        grad.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.strokeStyle = grad; ctx.lineWidth = 3.4;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      }
+    });
+    ctx.globalCompositeOperation = "source-over";
+    ctx.restore();
+  }
+
+  function signedPower() {
+    if (state.power !== 0 || (state.voltage === null && state.current === null)) {
+      // demo / direct power path
+    }
+    if (state.voltage !== null && state.current !== null) {
+      var p = state.voltage * state.current / 1000;
+      return Number.isFinite(p) ? p : 0;
+    }
+    return state.power;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Beast Mode (SPORT) — jaws biting the number, claw rips, shockwaves, shake.
+  // ---------------------------------------------------------------------------
+  function triggerBeast() {
+    beast.intro = 1; beast.shake = 1; beast.mawOpen = 1;
+    var hot = colorFor(1);
+    spawnClaws(hot);
+    beast.waves.push({ cx: LEFT.cx, cy: LEFT.cy, life: 1, color: hot });
+    beast.waves.push({ cx: RIGHT.cx, cy: RIGHT.cy, life: 1, color: hot });
+    if (els.banner) {
+      els.banner.classList.remove("show");
+      void els.banner.offsetWidth;                 // restart the CSS animation
+      els.banner.classList.add("show");
+      if (beastBannerTimer) clearTimeout(beastBannerTimer);
+      beastBannerTimer = setTimeout(function () { if (els.banner) els.banner.classList.remove("show"); }, 1300);
+    }
+  }
+
+  function spawnClaws(color) {
+    var ang = -0.45, len = 1550;
+    var dx = Math.cos(ang), dy = Math.sin(ang);
+    var px = -dy, py = dx;                          // perpendicular spacing
+    for (var k = 0; k < 3; k++) {
+      var s = (k - 1) * 92;
+      var cx = 960 + px * s, cy = 360 + py * s;
+      beast.claws.push({
+        x1: cx - dx * len / 2, y1: cy - dy * len / 2,
+        x2: cx + dx * len / 2, y2: cy + dy * len / 2,
+        life: 1, color: color
+      });
+    }
+  }
+
+  function drawClaws(dt) {
+    if (!beast.claws.length) return;
+    ctx.globalCompositeOperation = "lighter";
+    ctx.lineCap = "round";
+    for (var i = beast.claws.length - 1; i >= 0; i--) {
+      var c = beast.claws[i];
+      c.life -= dt / 650;
+      if (c.life <= 0) { beast.claws.splice(i, 1); continue; }
+      var reveal = clamp((1 - c.life) * 2.6, 0, 1);
+      var a = Math.min(1, c.life * 1.5);
+      var ex = c.x1 + (c.x2 - c.x1) * reveal;
+      var ey = c.y1 + (c.y2 - c.y1) * reveal;
+      ctx.strokeStyle = rgba(c.color, 0.45 * a);
+      ctx.lineWidth = 15;
+      ctx.beginPath(); ctx.moveTo(c.x1, c.y1); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.strokeStyle = "rgba(255,255,255," + (0.92 * a) + ")";
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(c.x1, c.y1); ctx.lineTo(ex, ey); ctx.stroke();
+    }
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  function drawWaves(dt) {
+    if (!beast.waves.length) return;
+    ctx.globalCompositeOperation = "lighter";
+    for (var i = beast.waves.length - 1; i >= 0; i--) {
+      var w = beast.waves[i];
+      w.life -= dt / 520;
+      if (w.life <= 0) { beast.waves.splice(i, 1); continue; }
+      var r = (1 - w.life) * 360 + 28;
+      var a = w.life;
+      ctx.strokeStyle = rgba(w.color, 0.5 * a);
+      ctx.lineWidth = 10 * a + 2;
+      ctx.beginPath(); ctx.arc(w.cx, w.cy, r, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  // Sculpted fanged jaws framing the number. Dark metallic body + neon rim +
+  // glossy hot tip, echoing the Apex metal-with-neon-edge look (no flat triangles).
+  // openv: 1 = retracted/hidden, ~0.14 = biting.
+  function drawMaw(g, openv, color, pulse) {
+    var alpha = clamp((1 - openv) / 0.5, 0, 1);
+    if (alpha <= 0.01) return;
+    var cx = g.ncx, cy = g.ncy;
+    var gap = 80 + openv * 160 + pulse * 8;
+    var halfW = 152, rows = 5;                       // fewer, bigger, meaner fangs
+    var spacing = (halfW * 2) / (rows - 1);
+    var w = spacing * 0.46;                          // bold bases, slight gap between teeth
+    for (var side = 0; side < 2; side++) {
+      var dir = side === 0 ? -1 : 1;                 // -1 = top row, +1 = bottom row
+      var jawY = cy + dir * gap;
+
+      // Thin glowing jaw ridge, bowed slightly toward the number at the center.
+      ctx.globalCompositeOperation = "lighter";
+      ctx.lineCap = "round";
+      ctx.strokeStyle = rgba(color, 0.3 * alpha);
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      for (var j = 0; j < rows; j++) {
+        var ju = (j / (rows - 1)) * 2 - 1;
+        var jx = cx + ju * halfW;
+        var jy = jawY + dir * (1 - ju * ju) * 9;
+        if (j === 0) ctx.moveTo(jx, jy); else ctx.lineTo(jx, jy);
+      }
+      ctx.stroke();
+
+      for (var i = 0; i < rows; i++) {
+        var u = (i / (rows - 1)) * 2 - 1;            // -1..1 across the jaw
+        var fx = cx + u * halfW;
+        var fang = 46 + 46 * (1 - Math.abs(u));      // long canines, dramatic taper
+        var baseY = jawY + dir * (1 - u * u) * 10;
+        var tipX = fx - u * 16;                       // tips hook toward the center
+        var tipY = baseY - dir * fang;               // sharp point toward the number
+        var midY = baseY - dir * fang * 0.52;
+
+        // Curved, tapered fang silhouette (concave sides + hook -> predator tooth).
+        ctx.beginPath();
+        ctx.moveTo(fx - w, baseY);
+        ctx.lineTo(fx + w, baseY);
+        ctx.quadraticCurveTo(fx + w * 0.3, midY, tipX, tipY);
+        ctx.quadraticCurveTo(fx - w * 0.3, midY, fx - w, baseY);
+        ctx.closePath();
+
+        // Soft neon bloom behind the fang (makes it read as a glowing solid, not a wireframe).
+        ctx.globalCompositeOperation = "lighter";
+        ctx.strokeStyle = rgba(color, 0.16 * alpha);
+        ctx.lineWidth = 12;
+        ctx.stroke();
+
+        // Solid, self-illuminated body brightening to a white-hot tip.
+        ctx.globalCompositeOperation = "source-over";
+        var grd = ctx.createLinearGradient(fx, baseY, tipX, tipY);
+        grd.addColorStop(0, rgba(color, 0.5 * alpha));
+        grd.addColorStop(0.55, rgba(color, 0.9 * alpha));
+        grd.addColorStop(1, "rgba(250,253,255," + (0.98 * alpha) + ")");
+        ctx.fillStyle = grd;
+        ctx.fill();
+
+        // Crisp neon rim.
+        ctx.globalCompositeOperation = "lighter";
+        ctx.strokeStyle = rgba(color, 0.9 * alpha);
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Glossy hot point.
+        var tg = ctx.createRadialGradient(tipX, tipY, 0, tipX, tipY, 10);
+        tg.addColorStop(0, "rgba(255,255,255," + (0.95 * alpha) + ")");
+        tg.addColorStop(1, rgba(color, 0));
+        ctx.fillStyle = tg;
+        ctx.beginPath(); ctx.arc(tipX, tipY, 10, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  // ---------------------------------------------------------------------------
+  // Frame
+  // ---------------------------------------------------------------------------
+  function render(now) {
+    raf = 0;
+    if (state.disposed || !state.active) return;
+    var dt = lastFrame ? (now - lastFrame) : FRAME_MS;
+    if (dt < FRAME_MS) { raf = requestAnimationFrame(render); return; }
+    lastFrame = now;
+    dt = Math.min(dt, 120);
+
+    // smoothing
+    var kS = 1 - Math.exp(-dt / 140);
+    state.prevDSpeed = state.dSpeed;
+    state.dSpeed += (state.speed - state.dSpeed) * kS;
+    state.dPower += (signedPower() - state.dPower) * (1 - Math.exp(-dt / 110));
+    var instAccel = (state.dSpeed - state.prevDSpeed) / (dt / 1000);
+    state.accel += (instAccel - state.accel) * 0.2;
+    if (state.gearFlash > 0) state.gearFlash = Math.max(0, state.gearFlash - dt / 450);
+
+    // Beast Mode timers
+    if (beast.intro > 0) beast.intro = Math.max(0, beast.intro - dt / 900);
+    if (beast.shake > 0) beast.shake = Math.max(0, beast.shake - dt / 520);
+    var mawTarget = beast.sport ? 0.14 : 1;
+    beast.mawOpen += (mawTarget - beast.mawOpen) * (1 - Math.exp(-dt / 110));
+    state.sportMix += ((beast.sport ? 1 : 0) - state.sportMix) * (1 - Math.exp(-dt / 260));
+
+    var sat = cfg.saturateSpeed > 0 ? cfg.saturateSpeed : 160;
+    var speedT = clamp(state.dSpeed / sat, 0, 1);
+    var sportK = beast.sport ? 1.7 : 1;
+    // In Sport the hue is pushed angrier (hotter) and effects are cranked up.
+    var colorT = beast.sport ? clamp(speedT + 0.24, 0, 1) : speedT;
+    var color = colorFor(colorT);                     // both gauges share the speed color
+    var scale = INTENSITY[cfg.intensity] || 1;
+    var accelN = clamp(state.accel / ACCEL_MAX, 0, 1);
+    // "overload" building with speed (+ a push from acceleration, gear change, Sport)
+    var overload = clamp(((0.75 * speedT + 0.5 * accelN) * scale + state.gearFlash + beast.intro * 0.6) * sportK, 0, 1.6);
+
+    var fSpeed = clamp(state.dSpeed / sat, 0, 1);
+    var powerFrac = clamp(state.dPower / POWER_MAX, -1, 1);
+    var regen = state.dPower < -0.3;
+    var rColor = regen ? REGEN : color;
+
+    ctx.clearRect(0, 0, W, H);
+    // Hard guarantee: all canvas content (gauges, sparks, sport FX) is confined to
+    // the side bands so nothing ever paints over the transparent ADAS window.
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, 520, H); ctx.rect(1400, 0, 520, H); ctx.clip();
+    if (state.sportMix > 0.01) drawSportBackground(state.sportMix, now, speedT);
+    if (!staticLayer.left) staticLayer.left = buildStatic(LEFT);
+    if (!staticLayer.right) staticLayer.right = buildStatic(RIGHT);
+    ctx.drawImage(staticLayer.left, 0, 0);
+    ctx.drawImage(staticLayer.right, 0, 0);
+
+    // LEFT speedometer: fills from bottom-left (A0) clockwise.
+    var leftTipDeg = A0 + fSpeed * SWEEP;
+    drawBand(LEFT, A0, leftTipDeg, false, color);
+    if (cfg.lightning) arcLightning(LEFT, A0, leftTipDeg, color, overload);
+    var tipL = drawTip(LEFT, leftTipDeg, color);
+
+    // RIGHT power meter: zero at TOP; traction clockwise, regen anticlockwise.
+    var rightTipDeg = TOP + powerFrac * (SWEEP / 2);
+    drawBand(RIGHT, TOP, rightTipDeg, powerFrac < 0, rColor);
+    if (cfg.lightning) arcLightning(RIGHT, TOP, rightTipDeg, rColor, overload * Math.abs(powerFrac) + overload * 0.25);
+    var tipR = drawTip(RIGHT, rightTipDeg, rColor);
+
+    // Sparks off the tips, more with speed. Tangent direction = arc direction.
+    if (cfg.sparks) {
+      var leftRate = (speedT * 2.2 + accelN * 1.0) * scale * sportK;
+      emit(tipL, leftTipDeg + 90, leftRate, color);
+      var rightRate = (Math.abs(powerFrac) * 1.6 + speedT * 0.8) * scale * sportK;
+      emit(tipR, rightTipDeg + (powerFrac < 0 ? -90 : 90), rightRate, rColor);
+    }
+    drawSparks(dt);
+
+    ctx.restore();                                    // end side-band clip
+
+    // Beast Mode layers render OVER EVERYTHING (full screen, unclipped) so the
+    // SPORT reveal — claws and shockwaves — sweeps across the whole cluster.
+    drawWaves(dt);
+    drawClaws(dt);
+
+    // Screen shake shakes the whole stage (canvas + readouts).
+    if (beast.shake > 0.01) {
+      var mag = beast.shake * 22;
+      applyStageTransform((Math.random() - 0.5) * mag, (Math.random() - 0.5) * mag);
+      shakeOn = true;
+    } else if (shakeOn) { applyStageTransform(0, 0); shakeOn = false; }
+
+    // DOM readouts
+    setText(els.speed, Math.round(state.dSpeed));
+    setText(els.power, Math.round(state.dPower));
+    setText(els.rightState, regen ? "REGEN" : (state.dPower > 0.3 ? "TRAÇÃO" : "—"));
+    setText(els.gear, state.gear);
+    setText(els.drive, state.drive);
+    els.speedBox.style.setProperty("--glow", rgba(color, 0.6));
+    els.gearBox.style.setProperty("--glow", rgba(color, 0.6));
+    els.rightBox.style.setProperty("--glow", rgba(rColor, 0.6));
+
+    var alive = anySpark() ||
+      Math.abs(state.speed - state.dSpeed) > 0.3 ||
+      Math.abs(signedPower() - state.dPower) > 0.3 ||
+      state.gearFlash > 0 || overload > 0.06 ||
+      beast.sport || beast.intro > 0 || beast.shake > 0 ||
+      beast.claws.length > 0 || beast.waves.length > 0 ||
+      state.sportMix > 0.01 ||
+      Math.abs(beast.mawOpen - mawTarget) > 0.01;
+    if (alive && !motion.matches) raf = requestAnimationFrame(render);
+  }
+
+  var sparkCarry = 0;
+  function emit(tip, angDeg, rate, color) {
+    sparkCarry += rate;
+    var n = Math.floor(sparkCarry);
+    sparkCarry -= n;
+    if (n > 0) emitSparks(tip, angDeg, n, color);
+  }
+
+  function setText(node, v) { var s = String(v); if (node && node.textContent !== s) node.textContent = s; }
+  function kick() { if (!raf && !state.disposed && state.active) raf = requestAnimationFrame(render); }
+
+  // ---------------------------------------------------------------------------
+  // Telemetry wiring (v1.0 bridge contract)
+  // ---------------------------------------------------------------------------
+  // Canonical telemetry keys (mirrors ApexGT core). Projection flags arrive as
+  // push-only signals; stored so the full data set is handled even if not shown.
+  var KEYS = {
+    "car.basic.vehicle_speed": "speed",
+    "car.basic.engine_speed": "rpm",
+    "car.basic.total_odometer": "odometer",
+    "car.basic.gear_status": "gear",
+    "car.drive_setting.drive_mode": "drive",
+    "car.ev_setting.power_model_config": "propulsion",
+    "car.basic.inside_temp": "insideTemp",
+    "car.basic.outside_temp": "outsideTemp",
+    "car.configure.default_temp_unit": "tempUnit",
+    "car.basic.remain_fuel_percentage": "fuel",
+    "car.ev_info.cur_battery_power_percentage": "battery",
+    "car.ev_info.fuel_mode_remain_odometer": "fuelRange",
+    "car.ev_info.electric_mode_remain_odometer": "batteryRange",
+    "car.basic.cur_journey_odometer": "trip",
+    "car.basic.cur_journey_avg_fuel_consume": "consumption",
+    "car.ev_info.power_battery_voltage": "voltage",
+    "car.ev_info.cur_charge_current": "current",
+    "carPlayInDash": "carPlayInDash",
+    "projectionMirrorInDash": "projectionMirrorInDash",
+    "aaClusterInDash": "aaClusterInDash",
+    "projectionPreparingD3": "projectionPreparingD3"
+  };
+  // Legacy aliases are only a fallback before the canonical reading of a field.
+  var ALIASES = {
+    carSpeed: "speed", engineRPM: "rpm", odometer: "odometer", gearState: "gear",
+    drivingMode: "drive", evMode: "propulsion", inside_temp: "insideTemp",
+    outside_temp: "outsideTemp", tempUnit: "tempUnit", fuelPercent: "fuel",
+    batteryPercent: "battery", fuelRange: "fuelRange", batteryRange: "batteryRange"
+  };
+  var PROJECTION_FIELDS = { carPlayInDash: 1, projectionMirrorInDash: 1, aaClusterInDash: 1, projectionPreparingD3: 1 };
+  var canonicalFields = Object.create(null);
+
+  function num(v) {
+    if (typeof v !== "number" && typeof v !== "string") return null;
+    if (typeof v === "string" && !/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(v.trim())) return null;
+    var n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  function boolVal(v) { return v === true || v === 1 || v === "1" || v === "true"; }
+  function enumVal(v, labels) {
+    var n = num(v);
+    if (n !== null && Object.prototype.hasOwnProperty.call(labels, String(n))) return labels[String(n)];
+    var s = typeof v === "string" ? v.trim().toUpperCase() : "";
+    return Object.keys(labels).some(function (k) { return labels[k] === s; }) ? s : null;
+  }
+
+  function apply(key, value, allowAlias) {
+    if (state.disposed) return;
+    // Feed the menu subsystem every key (it owns trip/tire/AC/setting fields the
+    // gauge layer ignores). It filters by its own key table.
+    if (menus) menus.update(key, value, allowAlias);
+    // Cluster visibility is driven by clusterEnabled (not the card) — see the
+    // check-cluster-visibility contract. Card 0 stays a live PAINEL.
+    if (key === "clusterEnabled") {
+      var vis = !(value === false || value === 0 || value === "0" || value === "false");
+      document.body.classList.toggle("hidden-card", !vis);
+      state.active = vis;
+      if (vis) { lastFrame = 0; kick(); }
+      else if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      return;
+    }
+    var field = KEYS[key] || (allowAlias ? ALIASES[key] : null);
+    if (!field) return;
+    // A canonical reading locks the field; later aliases must not override it.
+    if (KEYS[key]) canonicalFields[field] = true;
+    else if (canonicalFields[field]) return;
+
+    if (field === "gear") {
+      var g = enumVal(value, GEARS) || "--";
+      if (state.gear !== g) { state.gearFlash = 0.5; state.gear = g; }
+      kick(); scheduleReadouts(); return;
+    }
+    if (field === "drive") {
+      var prevDrive = state.drive;
+      state.drive = enumVal(value, DRIVES) || "--";
+      if (state.drive === "SPORT" && prevDrive !== "SPORT") { beast.sport = true; triggerBeast(); }
+      else if (state.drive !== "SPORT" && prevDrive === "SPORT") { beast.sport = false; }
+      stage.classList.toggle("sport-mode", beast.sport);
+      kick(); scheduleReadouts(); return;
+    }
+    if (field === "propulsion") {
+      if (key === "evMode" && typeof value === "string" &&
+          /^HEV (?:INTELIGENTE|PRIORIDADE \d+%)$/i.test(value.trim())) value = "HEV";
+      state.propulsion = enumVal(value, PROPULSION) || "--";
+      scheduleReadouts(); return;
+    }
+    if (PROJECTION_FIELDS[field]) { state[field] = boolVal(value); scheduleReadouts(); return; }
+
+    // Numeric fields, with the same sentinels/guards ApexGT applies.
+    if (allowAlias && key === "tempUnit" && value === "°F") value = 1;
+    var n = num(value);
+    if ((field === "insideTemp" || field === "outsideTemp") && (n === -1 || n === 255)) n = null;
+    if (field !== "insideTemp" && field !== "outsideTemp" && field !== "current" && n !== null && n < 0) n = null;
+    if ((field === "fuel" || field === "battery") && n !== null && n > 100) n = null;
+
+    if (field === "speed") { if (n === null) return; state.speed = clamp(n, 0, 320); kick(); scheduleReadouts(); return; }
+    if (field === "voltage") { state.voltage = n; kick(); return; }
+    if (field === "current") { state.current = n; kick(); return; }
+
+    if (state[field] === n) return;
+    state[field] = n;
+    scheduleReadouts();
+  }
+
+  // Derived readouts are painted on their own rAF so they stay current even when
+  // the gauge animation loop is idle (parked car, reduced motion, etc.).
+  function fmt(v, dec) {
+    if (v === null || !Number.isFinite(v)) return "--";
+    var f = v.toFixed(dec || 0);
+    return Number(f) === 0 ? (0).toFixed(dec || 0) : f;
+  }
+  function fillBar(node, pct) {
+    if (!node) return;
+    var t = "scaleX(" + (pct === null ? 0 : clamp(pct, 0, 100) / 100) + ")";
+    if (node.style.transform !== t) node.style.transform = t;
+  }
+  var roRaf = 0;
+  function scheduleReadouts() {
+    if (state.disposed || roRaf) return;
+    roRaf = requestAnimationFrame(function () { roRaf = 0; paintReadouts(); });
+  }
+  function paintReadouts() {
+    if (state.disposed) return;
+    var tu = state.tempUnit === 1 ? "°F" : "°C";
+    setText(els.outTemp, state.outsideTemp === null ? "--" : fmt(state.outsideTemp) + tu);
+    setText(els.inTemp,  state.insideTemp === null ? "--" : fmt(state.insideTemp) + tu);
+    setText(els.fuelPercent, state.fuel === null ? "--" : fmt(state.fuel) + "%");
+    setText(els.fuelLiters,  state.fuel === null ? "--" : fmt(state.fuel * FUEL_TANK_LITERS / 100, 1) + " L");
+    setText(els.fuelRange,   fmt(state.fuelRange) + " km");
+    fillBar(els.fuelFill, state.fuel);
+    setText(els.batteryPercent, state.battery === null ? "--" : fmt(state.battery) + "%");
+    setText(els.batteryRange,   fmt(state.batteryRange) + " km");
+    fillBar(els.batteryFill, state.battery);
+    setText(els.odometer, fmt(state.odometer));
+    setText(els.trip, fmt(state.trip, 1));
+    // Source is L/100 km; show km/L (reciprocal), or L/100 km when zero.
+    setText(els.consumption, state.consumption === null ? "--"
+            : fmt(state.consumption > 0 ? 100 / state.consumption : 0, 1));
+    setText(els.consumptionUnit, state.consumption === 0 ? "L/100km" : "km/L");
+    var total = (state.fuelRange === null || state.batteryRange === null) ? null : state.fuelRange + state.batteryRange;
+    setText(els.totalRange, fmt(total));
+    setText(els.propulsion, state.propulsion || "--");
+    if (els.rpmReadout) {
+      var showRpm = state.rpm !== null && state.rpm > 0;
+      els.rpmReadout.hidden = !showRpm;
+      if (showRpm) setText(els.engineRpm, fmt(state.rpm));
+    }
+  }
+
+  window.onDataChanged = function (k, v) { apply(k, v, false); };
+  window.control = function (k, v) { apply(k, v, true); };
+  window.onCardChanged = function (cardId) {
+    var n = Number(cardId);
+    state.card = n;
+    // Cards 0/1/3 all keep the gauges live (PAINEL / MENU / AC); visibility is a
+    // separate clusterEnabled signal. The menu overlay owns card 1 and card 3.
+    if (menus) menus.onCardChanged(n);
+    lastFrame = 0; kick();
+  };
+  window.onKeyEvent = function (keyName) { if (menus) menus.onKeyEvent(keyName); };
+  window.showScreen = function () {};
+  window.focus = function () {};
+  window.cleanup = function () {
+    if (state.disposed) return;
+    state.disposed = true;
+    if (menus) { try { menus.cleanup(); } catch (e) {} }
+    if (raf) cancelAnimationFrame(raf);
+    if (clockTimer) clearTimeout(clockTimer);
+    if (heartbeat) clearInterval(heartbeat);
+    if (demoTimer) clearInterval(demoTimer);
+    if (beastBannerTimer) clearTimeout(beastBannerTimer);
+    window.removeEventListener("pagehide", window.cleanup);
+    if (subscribed.length && window.Android && window.Android.unsubscribe) {
+      try { window.Android.unsubscribe(JSON.stringify(subscribed)); } catch (e) {}
+    }
+  };
+
+  var subscribed = [];
+  function loadConfig(bridge) {
+    if (!bridge || !bridge.getPreference) return;
+    try {
+      cfg.intensity = bridge.getPreference("stormIntensity", cfg.intensity) || cfg.intensity;
+      cfg.lightning = bridge.getPreference("stormLightning", "true") !== "false";
+      cfg.sparks = bridge.getPreference("stormSparks", "true") !== "false";
+      var sv = Number(bridge.getPreference("stormSaturateSpeed", String(cfg.saturateSpeed)));
+      if (Number.isFinite(sv) && sv > 0) cfg.saturateSpeed = sv;
+    } catch (e) {}
+  }
+
+  function subscribe() {
+    var bridge = window.Android;
+    if (!bridge || typeof bridge.subscribe !== "function") return false;
+    loadConfig(bridge);
+    var available = [];
+    try { if (bridge.getAvailableKeys) available = JSON.parse(bridge.getAvailableKeys()); } catch (e) {}
+    var prefs = ["app.preferences.stormIntensity", "app.preferences.stormLightning",
+                 "app.preferences.stormSparks", "app.preferences.stormSaturateSpeed"];
+    // Union of gauge keys + the menu subsystem's keys (trip/tire/AC/settings) +
+    // the clusterEnabled visibility signal, de-duplicated.
+    var carKeys = Object.keys(KEYS).concat(menus ? menus.keys : []).concat(["clusterEnabled"]);
+    var seenKey = Object.create(null);
+    carKeys = carKeys.filter(function (k) { if (seenKey[k]) return false; seenKey[k] = true; return true; });
+    var wanted = carKeys.concat(prefs);
+    subscribed = wanted.filter(function (k) {
+      return k.indexOf("app.preferences.") === 0 || !available.length || available.indexOf(k) !== -1;
+    });
+    try { bridge.subscribe(JSON.stringify(subscribed)); } catch (e) { subscribed = []; return false; }
+    if (bridge.getCarData) {
+      carKeys.forEach(function (k) { try { apply(k, bridge.getCarData(k), false); } catch (e) {} });
+    }
+    return true;
+  }
+
+  var origDataChanged = window.onDataChanged;
+  window.onDataChanged = function (k, v) {
+    if (k === "app.preferences.stormIntensity") { cfg.intensity = v || cfg.intensity; kick(); return; }
+    if (k === "app.preferences.stormLightning") { cfg.lightning = (v === "true" || v === true || v === "1"); kick(); return; }
+    if (k === "app.preferences.stormSparks") { cfg.sparks = (v === "true" || v === true || v === "1"); kick(); return; }
+    if (k === "app.preferences.stormSaturateSpeed") { var n = Number(v); if (n > 0) cfg.saturateSpeed = n; kick(); return; }
+    origDataChanged(k, v);
+  };
+
+  // ---------------------------------------------------------------------------
+  // Clock, heartbeat, fit-to-window, dev demo
+  // ---------------------------------------------------------------------------
+  var clockTimer = null, heartbeat = null, demoTimer = null, beastBannerTimer = null;
+  function tickClock() {
+    if (state.disposed) return;
+    var d = new Date();
+    setText(els.clock, String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"));
+    clockTimer = setTimeout(tickClock, 60000 - (d.getSeconds() * 1000 + d.getMilliseconds()));
+  }
+
+  var viewScale = 1, viewLeft = 0, viewTop = 0;
+  function fit() {
+    viewScale = Math.min(window.innerWidth / W, window.innerHeight / H);
+    viewLeft = (window.innerWidth - W * viewScale) / 2;
+    viewTop = (window.innerHeight - H * viewScale) / 2;
+    applyStageTransform(0, 0);
+  }
+  function applyStageTransform(dx, dy) {
+    stage.style.left = "0px"; stage.style.top = "0px";
+    stage.style.transform = "translate(" + (viewLeft + dx) + "px," + (viewTop + dy) + "px) scale(" + viewScale + ")";
+  }
+  window.addEventListener("resize", fit);
+
+  // Browser-only preview driver. Never runs when the native bridge is present.
+  function startDemo() {
+    var t = 0, frames = 0, sport = false;
+    state.gear = "D";
+    apply("car.drive_setting.drive_mode", "0", false);   // start NORMAL
+    // Seed the full telemetry set so every readout is exercised in the preview.
+    apply("car.basic.total_odometer", "48213", false);
+    apply("car.basic.remain_fuel_percentage", "62", false);
+    apply("car.ev_info.cur_battery_power_percentage", "81", false);
+    apply("car.ev_info.fuel_mode_remain_odometer", "430", false);
+    apply("car.ev_info.electric_mode_remain_odometer", "72", false);
+    apply("car.basic.cur_journey_odometer", "32.4", false);
+    apply("car.basic.cur_journey_avg_fuel_consume", "8.0", false);
+    apply("car.basic.outside_temp", "23", false);
+    apply("car.basic.inside_temp", "24", false);
+    apply("car.configure.default_temp_unit", "0", false);
+    apply("car.ev_setting.power_model_config", "0", false);  // HEV
+    apply("car.basic.engine_speed", "0", false);
+    // Menu-only telemetry so the MENU (info/graphs/trips) and AC previews fill in.
+    apply("car.basic.cur_journey_drivetime", "47", false);
+    apply("car.basic.avg_vehicle_speed_since_startup", "38.5", false);
+    apply("car.basic.accumulated_odometer", "1284.6", false);
+    apply("car.basic.accumulated_drivetime", "1890", false);
+    apply("car.basic.avg_fuel_consumption", "7.4", false);
+    apply("car.basic.vehicle_speed_since_reset", "41.2", false);
+    apply("car.basic.tire_pressure_front_left", "221", false);
+    apply("car.basic.tire_pressure_front_right", "223", false);
+    apply("car.basic.tire_pressure_rear_left", "219", false);
+    apply("car.basic.tire_pressure_rear_right", "224", false);
+    apply("car.drive_setting.steering_wheel_assist_mode", "0", false);
+    apply("car.ev_setting.energy_recovery_level", "0", false);
+    apply("car.drive_setting.esp_enable", "1", false);
+    apply("car.ev_info.power_battery_voltage", "352", false);
+    apply("car.ev_info.cur_charge_current", "18", false);
+    apply("car.hvac.power_mode", "1", false);
+    apply("car.hvac.fan_speed", "4", false);
+    apply("car.hvac.driver_temperature", "22.5", false);
+    apply("car.hvac.auto_enable", "1", false);
+    apply("car.hvac.cycle_mode", "0", false);
+    demoTimer = setInterval(function () {
+      t += 0.05; frames++;
+      var base = (Math.sin(t) * 0.5 + 0.5);
+      var surge = Math.max(0, Math.sin(t * 2.3)) * 0.4;
+      var target = clamp(base * 0.8 + surge, 0, 1);
+      state.speed = target * 160;
+      state.power = Math.sin(t * 1.7) * 78;              // traction/regen swing
+      if (frames % 70 === 0) {                            // toggle drive mode ~every 8.4s
+        sport = !sport;
+        apply("car.drive_setting.drive_mode", sport ? "1" : "0", false);
+      }
+      if (frames % 40 === 0) {                            // slow drift on fuel/battery
+        apply("car.basic.remain_fuel_percentage", String(55 + Math.round(10 * (Math.sin(t * 0.3) * 0.5 + 0.5))), false);
+        apply("car.ev_info.cur_battery_power_percentage", String(70 + Math.round(25 * (Math.sin(t * 0.4 + 1) * 0.5 + 0.5))), false);
+      }
+      kick();
+    }, 120);
+  }
+
+  window.addEventListener("pagehide", window.cleanup);
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) { if (raf) { cancelAnimationFrame(raf); raf = 0; } }
+    else if (state.active) { lastFrame = 0; kick(); }
+  });
+
+  // Build the menu subsystem before wiring telemetry so the first snapshot and
+  // card change reach it. Degrades gracefully if the module failed to load.
+  if (window.StormMenus) {
+    try { menus = window.StormMenus.create({ root: stage, mount: document.getElementById("storm-menus") }); } catch (e) { menus = null; }
+  }
+
+  fit();
+  tickClock();
+  scheduleReadouts();
+  if (subscribe()) {
+    if (window.Android && window.Android.heartbeat) {
+      heartbeat = setInterval(function () { try { window.Android.heartbeat(); } catch (e) {} }, 2000);
+    }
+    kick();
+  } else {
+    startDemo();
+  }
+})();
+</script>
+</body>
+</html>
