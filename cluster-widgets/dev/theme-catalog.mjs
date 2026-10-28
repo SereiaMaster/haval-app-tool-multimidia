@@ -23,7 +23,13 @@ function listDirectories(parentPath) {
 
 const themeLabOverrides = new Map([
   ['source/v1.0/ApexGT', { keyboard: 'none', telemetry: 'injected' }],
-  ['source/v1.0/apex-storm', { keyboard: 'none', telemetry: 'injected' }],
+  // Apex Storm keeps the "Navegacao do tema" routing (keyboard:'none') but drives
+  // telemetry from its own self-contained preview (startDemo) instead of the shared
+  // injected harness. Unlike ApexGT it has no Theme Lab simulator to install a mock
+  // window.Android / translate legacy aliases into canonical car.* keys, so 'injected'
+  // left two telemetry sources fighting (startDemo + harness). 'native' keeps a single
+  // coherent source in the Lab and never touches the real-car bridge path.
+  ['source/v1.0/apex-storm', { keyboard: 'none', telemetry: 'native' }],
 ]);
 
 function readTheme(directory, relativeDirectory, kind, preferredEntry) {

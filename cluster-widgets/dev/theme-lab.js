@@ -290,7 +290,10 @@ function onThemeFrameLoaded() {
     setStatus(`${activeTheme.label} carregado · adaptador legado indisponível`);
   }
 
-  if (activeTheme.keyboard === 'native') {
+  // Themes without an injected harness (keyboard:'native', or the "Navegação do
+  // tema" mode paired with telemetry:'native' like Apex Storm) never receive the
+  // harness onReady callback, so surface the loaded status here instead.
+  if (activeTheme.keyboard === 'native' || activeTheme.telemetry !== 'injected') {
     setStatus(formatLoadedStatus(activeTheme));
   }
   focusFrame();
