@@ -25,6 +25,7 @@ const elements = {
   panelActions: document.getElementById('panel-actions'),
   panelButtons: [...document.querySelectorAll('[data-panel]')],
   wheelButtons: [...document.querySelectorAll('[data-wheel-key]')],
+  cardButtons: [...document.querySelectorAll('[data-card-id]')],
 };
 
 let themes = [];
@@ -37,6 +38,14 @@ let sportGaugeAdapter = null;
 let projectionSimulatorAdapter = null;
 let harnessObserver = null;
 let activeHarnessPanel = null;
+let contractKeyboardAdapter = null;
+
+// Cards exposed by the contract v1.0 host (0 = painel, 1 = menu, 3 = A/C). The
+// Theme Lab lets you cycle them because 'keyboard:none' themes (ApexGT, Apex Storm)
+// open their menu/AC overlays only via window.onCardChanged — there is no in-theme
+// shortcut, exactly like the real head unit driving the card from hardware.
+const CARD_SEQUENCE = [0, 1, 3];
+let activeCardId = 0;
 
 const harnessPanelIds = [
   'testing-settings-harness',
@@ -143,6 +152,74 @@ function activateWheelKey(keyName) {
   if (!themeWindow || typeof themeWindow.onKeyEvent !== 'function') return;
   themeWindow.onKeyEvent(keyName);
   focusFrame();
+}
+
+function updateCardButtons() {
+  for (const button of elements.cardButtons) {
+    button.setAttribute('aria-pressed', String(Number(button.dataset.cardId) === activeCardId));
+  }
+}
+
+function setActiveCard(cardId) {
+  const themeWindow = elements.frame.contentWindow;
+  if (!themeWindow || typeof themeWindow.onCardChanged !== 'function') return;
+  activeCardId = cardId;
+  themeWindow.onCardChanged(cardId);
+  updateCardButtons();
+  focusFrame();
+}
+
+function cycleCard(direction) {
+  const index = Math.max(0, CARD_SEQUENCE.indexOf(activeCardId));
+  setActiveCard(CARD_SEQUENCE[(index + direction + CARD_SEQUENCE.length) % CARD_SEQUENCE.length]);
+}
+
+// Maps Theme Lab keyboard shortcuts to the contract v1.0 host callbacks for
+// 'keyboard:none' themes. Mirrors the documented keys ([ ] / PgUp / PgDn switch
+// cards; arrows/Enter/Back navigate) and the steering-wheel long-press commands.
+const CONTRACT_WHEEL_KEYS = {
+  ArrowUp: 'UP',
+  ArrowDown: 'DOWN',
+  Enter: 'ENTER',
+  Backspace: 'BACK',
+  Escape: 'BACK',
+  ' ': 'ENTER_LONG',
+};
+
+function handleContractKey(event) {
+  if (event.ctrlKey || event.altKey || event.metaKey) return false;
+  if (event.key === '[' || event.key === 'PageUp') { cycleCard(-1); return true; }
+  if (event.key === ']' || event.key === 'PageDown') { cycleCard(1); return true; }
+  const wheelKey = (event.shiftKey && event.key === 'Backspace')
+    ? 'BACK_LONG'
+    : CONTRACT_WHEEL_KEYS[event.key];
+  if (!wheelKey) return false;
+  activateWheelKey(wheelKey);
+  return true;
+}
+
+// Contract v1.0 themes ('keyboard:none') never bind DOM keydown, so install a
+// Lab-side listener on the frame document (same pattern as the legacy adapter) to
+// translate keyboard shortcuts into onCardChanged/onKeyEvent calls.
+function installContractKeyboardAdapter() {
+  if (!activeTheme || activeTheme.keyboard !== 'none') return null;
+  let frameDocument;
+  try {
+    frameDocument = elements.frame.contentWindow.document;
+  } catch {
+    return null;
+  }
+  const onKeyDown = (event) => {
+    const target = event.target;
+    if (target && typeof target.closest === 'function' && target.closest('input, textarea, select')) return;
+    if (handleContractKey(event)) event.preventDefault();
+  };
+  frameDocument.addEventListener('keydown', onKeyDown);
+  return {
+    cleanup() {
+      try { frameDocument.removeEventListener('keydown', onKeyDown); } catch { /* frame swapped */ }
+    },
+  };
 }
 
 function loadTheme(theme) {
@@ -258,6 +335,10 @@ function onThemeFrameLoaded() {
   sportGaugeAdapter = null;
   projectionSimulatorAdapter?.cleanup();
   projectionSimulatorAdapter = null;
+  contractKeyboardAdapter?.cleanup();
+  contractKeyboardAdapter = null;
+  activeCardId = 0;
+  updateCardButtons();
 
   try {
     prepareThemeDocument();
@@ -271,6 +352,7 @@ function onThemeFrameLoaded() {
       (state) => setStatus(formatLegacyStatus(state)),
     );
     apexGtSimulatorAdapter = installApexGtSimulator(elements.frame.contentWindow);
+    contractKeyboardAdapter = installContractKeyboardAdapter();
     legacyTelemetryAdapter = installLegacyTelemetryHarness(
       elements.frame.contentWindow,
       activeTheme,
@@ -405,6 +487,9 @@ for (const button of elements.panelButtons) {
 }
 for (const button of elements.wheelButtons) {
   button.addEventListener('click', () => activateWheelKey(button.dataset.wheelKey));
+}
+for (const button of elements.cardButtons) {
+  button.addEventListener('click', () => setActiveCard(Number(button.dataset.cardId)));
 }
 elements.frame.addEventListener('load', onThemeFrameLoaded);
 document.addEventListener('keydown', forwardKeyToFrame);
