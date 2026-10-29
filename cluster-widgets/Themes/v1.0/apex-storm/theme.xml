@@ -1,7 +1,7 @@
 <theme>
     <name>Apex Storm</name>
     <description>Dois mostradores circulares em neon que mudam de cor conforme a velocidade (azul -> vermelho ate 160 km/h), com raios e faiscas reativos a velocidade e aceleracao. Canvas 2D a 30fps, centro transparente para o ADAS nativo.</description>
-    <version>0.3.1</version>
+    <version>0.3.2</version>
     <thumbnail>thumbnail.png</thumbnail>
     <mainFile>app.html</mainFile>
     <decentralized>true</decentralized>
