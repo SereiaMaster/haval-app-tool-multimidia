@@ -41,19 +41,15 @@
      seam — a smooth blur-like color transition. Outer edges stay solid (they
      bleed off-screen). The neon gauges live on the canvas above and are NOT
      masked, so arcs/ticks stay crisp. */
-  /* Each side panel stays fully opaque up to the ADAS boundary (x520 / x1400) so
-     the OEM clusters remain covered, then feathers ONLY its inner edge a few pixels
-     INTO the central ADAS window for a soft panel->ADAS transition. Feathering
-     inward (toward the sides) is avoided because it would re-expose the OEM sliver
-     the panels are meant to hide. The footer feathers its top edge the same way. */
-  #surf-left  { left: -80px; top: 72px; width: 648px; height: 648px;
-                background: radial-gradient(360px 420px at 342px 288px, rgba(18,36,60,0.42), rgba(1,3,5,0) 60%), #010305;
-                -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent);
-                        mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent); }
-  #surf-right { right: -80px; top: 72px; width: 648px; height: 648px;
-                background: radial-gradient(360px 420px at 306px 288px, rgba(18,36,60,0.42), rgba(1,3,5,0) 60%), #010305;
-                -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 48px), transparent);
-                        mask-image: linear-gradient(to left, #000 calc(100% - 48px), transparent); }
+  /* Side panels: fully opaque, CRISP inner edge exactly at the ADAS boundary
+     (x520 / x1400). A soft feather on a vertical wall is physically impossible
+     without either covering the central ADAS (overflow) or re-exposing the OEM
+     cluster sliver, so the inner wall is a hard seam right on the boundary. The
+     outer edges bleed off-screen (-80px) to swallow the OEM overscan slivers. */
+  #surf-left  { left: -80px; top: 72px; width: 600px; height: 648px;
+                background: radial-gradient(360px 420px at 342px 288px, rgba(18,36,60,0.42), rgba(1,3,5,0) 60%), #010305; }
+  #surf-right { right: -80px; top: 72px; width: 600px; height: 648px;
+                background: radial-gradient(360px 420px at 258px 288px, rgba(18,36,60,0.42), rgba(1,3,5,0) 60%), #010305; }
   /* Footer keeps its original opaque band (y650-720) fully solid so it still hides
      100% of the lower OEM strip, and grows 48px UPWARD; that extra height is the
      feather that bleeds into the ADAS above, rather than eating into the band. */
