@@ -57,18 +57,6 @@
                 -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 48px), transparent);
                         mask-image: linear-gradient(to top, #000 calc(100% - 48px), transparent); }
 
-  /* SPORT red wash — ONE continuous translucent layer across the whole cluster
-     (both sides + footer), fading to clear in the central ADAS window, so there
-     are no "boxed" red edges like before. The gradient color is set from the
-     theme config at runtime (default red) and kept low-alpha so it tints rather
-     than floods. Sits above the opaque panels (z1) but below the neon canvas
-     (z2 in DOM order), so the gauge colors stay pure. */
-  #sport-wash {
-    position: absolute; inset: 0; z-index: 1; opacity: 0;
-    transition: opacity .5s ease; pointer-events: none;
-  }
-  #stage.sport-mode #sport-wash { opacity: 1; }
-
   /* Gauges above the surfaces; DOM readouts above the gauges. */
   .readout, .corner, .panel, #info-rail, #beast-banner, #rpm-readout { z-index: 4; }
   /* Center column stays clear for the OEM ADAS / speed-limit / ESP overlays. */
@@ -299,7 +287,6 @@
     <div id="surf-left" class="surface" aria-hidden="true"></div>
     <div id="surf-right" class="surface" aria-hidden="true"></div>
     <div id="surf-footer" class="surface" aria-hidden="true"></div>
-    <div id="sport-wash" aria-hidden="true"></div>
     <canvas id="storm" width="1920" height="720" aria-hidden="true"></canvas>
     <div id="out-temp" class="corner">--</div>
     <div id="in-temp" class="corner">--</div>
@@ -970,8 +957,14 @@
   // ---------------------------------------------------------------------------
   var cfg = {
     intensity: "Equilibrado", lightning: true, sparks: true, saturateSpeed: 160,
-    // Configurable colors (theme.xml `color` configs). Defaults = original look.
-    coldColor: [46, 139, 255], hotColor: [255, 59, 46], regenColor: [60, 255, 170],
+    // Neon glow intensity multiplier (0..~1.3). Lower = darker, less white blow-out
+    // on the car's low-contrast TFT. Default is dimmed vs. the old baked-in look.
+    glow: 0.72,
+    // Fully configurable speed ramp (theme.xml `color` configs): 5 stops from the
+    // cold (rest) color through three mids to the hot (SPORT / top speed) color,
+    // plus the regen color. Defaults = original look.
+    coldColor: [46, 139, 255], midColor1: [25, 224, 214], midColor2: [122, 60, 255],
+    midColor3: [255, 45, 155], hotColor: [255, 59, 46], regenColor: [60, 255, 170],
     // Configurable bipolar power-meter full-scale (kW).
     tractionScale: POWER_MAX_TRACTION, regenScale: POWER_MAX_REGEN
   };
@@ -994,7 +987,6 @@
     rightState: document.getElementById("right-state"),
     gear: document.getElementById("gear"),
     drive: document.getElementById("drive"),
-    sportWash: document.getElementById("sport-wash"),
     speedBox: document.getElementById("speed-box"),
     rightBox: document.getElementById("right-box"),
     gearBox: document.getElementById("gear"),
@@ -1075,23 +1067,15 @@
   }
   function rgba(c, a) { return "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + a + ")"; }
 
-  // Push the configurable colors into the speed ramp (cold = start, hot = end),
-  // the regen color, and the unified SPORT wash gradient. Called after config
-  // load and whenever a color preference changes.
+  // Push every configurable color into the 5-stop speed ramp and the regen color.
+  // Called after config load and whenever a color preference changes.
   function applyColors() {
     RAMP[0][1] = cfg.coldColor.slice();
-    RAMP[RAMP.length - 1][1] = cfg.hotColor.slice();
+    RAMP[1][1] = cfg.midColor1.slice();
+    RAMP[2][1] = cfg.midColor2.slice();
+    RAMP[3][1] = cfg.midColor3.slice();
+    RAMP[4][1] = cfg.hotColor.slice();
     REGEN = cfg.regenColor.slice();
-    if (els.sportWash) {
-      var h = cfg.hotColor;
-      var c = h[0] + "," + h[1] + "," + h[2];
-      // Continuous, low-alpha glow: left + right + a wide bottom sweep across the
-      // footer, all fading to transparent toward the center ADAS window.
-      els.sportWash.style.background =
-        "radial-gradient(1200px 820px at 13% 50%, rgba(" + c + ",0.17), rgba(" + c + ",0) 60%)," +
-        "radial-gradient(1200px 820px at 87% 50%, rgba(" + c + ",0.17), rgba(" + c + ",0) 60%)," +
-        "radial-gradient(1800px 520px at 50% 116%, rgba(" + c + ",0.13), rgba(" + c + ",0) 72%)";
-    }
   }
 
   // --- Static layer (track + ticks), rendered once per gauge, then blitted. ---
@@ -1126,12 +1110,13 @@
       ctx.strokeStyle = style; ctx.lineWidth = w; ctx.lineCap = "round";
       ctx.beginPath(); ctx.arc(g.cx, g.cy, g.r, rad(a0), rad(a1), anti); ctx.stroke();
     }
-    stroke(38, rgba(color, 0.62), "source-over");  // solid body = volume
-    stroke(96, rgba(color, 0.11), "lighter");       // broad outer bloom
-    stroke(62, rgba(color, 0.22), "lighter");       // outer halo
-    stroke(34, rgba(color, 0.40), "lighter");       // inner halo
-    stroke(16, rgba(color, 0.95), "lighter");       // bright core
-    stroke(4, "rgba(246,251,255,0.98)", "lighter"); // white-hot center line
+    var G = cfg.glow;
+    stroke(38, rgba(color, 0.62), "source-over");       // solid body = volume
+    stroke(96, rgba(color, 0.11 * G), "lighter");        // broad outer bloom
+    stroke(62, rgba(color, 0.22 * G), "lighter");        // outer halo
+    stroke(34, rgba(color, 0.40 * G), "lighter");        // inner halo
+    stroke(16, rgba(color, 0.80 * G), "lighter");        // bright core
+    stroke(4, "rgba(228,240,255," + (0.82 * G) + ")", "lighter"); // hot center line
     ctx.globalCompositeOperation = "source-over";
   }
 
@@ -1150,13 +1135,14 @@
     ctx.strokeStyle = "rgba(205,225,245,0.55)"; ctx.lineWidth = 3; ctx.lineCap = "round";
     ctx.beginPath(); ctx.moveTo(x - w / 2 - 11, cy); ctx.lineTo(x + w / 2 + 11, cy); ctx.stroke();
     // Neon fill from center to the tip.
+    var G = cfg.glow;
     var tip = cy - frac * h;                     // frac>0 -> up; frac<0 -> down
     barSeg(x, cy, tip, w, rgba(color, 0.62), "source-over");
-    barSeg(x, cy, tip, w + 58, rgba(color, 0.10), "lighter");
-    barSeg(x, cy, tip, w + 26, rgba(color, 0.22), "lighter");
-    barSeg(x, cy, tip, w - 4, rgba(color, 0.42), "lighter");
-    barSeg(x, cy, tip, Math.max(4, w - 14), rgba(color, 0.92), "lighter");
-    barSeg(x, cy, tip, 4, "rgba(246,251,255,0.96)", "lighter");
+    barSeg(x, cy, tip, w + 58, rgba(color, 0.10 * G), "lighter");
+    barSeg(x, cy, tip, w + 26, rgba(color, 0.22 * G), "lighter");
+    barSeg(x, cy, tip, w - 4, rgba(color, 0.42 * G), "lighter");
+    barSeg(x, cy, tip, Math.max(4, w - 14), rgba(color, 0.80 * G), "lighter");
+    barSeg(x, cy, tip, 4, "rgba(228,240,255," + (0.82 * G) + ")", "lighter");
     ctx.globalCompositeOperation = "source-over";
   }
 
@@ -1181,8 +1167,9 @@
         var py = g.cy + Math.sin(ang) * rr;
         if (s === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
       }
-      ctx.strokeStyle = tinted ? rgba(color, 0.35 * power + 0.1)
-                               : "rgba(235,248,255," + (0.3 + 0.45 * power) + ")";
+      var G = cfg.glow;
+      ctx.strokeStyle = tinted ? rgba(color, (0.35 * power + 0.1) * G)
+                               : "rgba(228,240,255," + ((0.3 + 0.45 * power) * G) + ")";
       ctx.lineWidth = tinted ? 3 : 1.5;
       ctx.stroke();
     }
@@ -1196,9 +1183,10 @@
   function drawTip(g, angDeg, color) {
     var p = tipPoint(g, angDeg);
     ctx.globalCompositeOperation = "lighter";
+    var G = cfg.glow;
     var glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 62);
-    glow.addColorStop(0, "rgba(255,255,255,0.98)");
-    glow.addColorStop(0.28, rgba(color, 0.92));
+    glow.addColorStop(0, "rgba(246,251,255," + (0.92 * G) + ")");
+    glow.addColorStop(0.28, rgba(color, 0.80 * G));
     glow.addColorStop(1, rgba(color, 0));
     ctx.fillStyle = glow;
     ctx.beginPath(); ctx.arc(p.x, p.y, 62, 0, Math.PI * 2); ctx.fill();
@@ -1232,7 +1220,7 @@
       p.vy += 11 * sec;                               // gravity
       var nx = p.x + p.vx, ny = p.y + p.vy;
       var a = clamp(p.life / p.max, 0, 1);
-      ctx.strokeStyle = rgba(p.color, 0.9 * a);
+      ctx.strokeStyle = rgba(p.color, 0.9 * a * cfg.glow);
       ctx.lineWidth = 2.2;
       ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(nx, ny); ctx.stroke();
       p.x = nx; p.y = ny;
@@ -1241,52 +1229,41 @@
   }
   function anySpark() { for (var i = 0; i < sparks.length; i++) if (sparks[i].life > 0) return true; return false; }
 
-  // --- SPORT background: red neon pools behind each dial + "warp" speed streaks
-  //     bursting outward on the OUTER side of each gauge (center ADAS stays clear).
-  //     Additive only, no filters; intensity scales with the sport fade + speed. ---
-  function drawSportBackground(mix, now, speedT, leftOnly) {
+  // --- SPORT background: "hyperspace" warp — streaks radiating straight out from
+  //     each dial's CENTER, flying outward and stretching with speed (Star Wars
+  //     jump to lightspeed). No red wash, no glow pools, no per-frame gradients:
+  //     just a handful of cheap additive strokes in the current speed color, so it
+  //     stays light on the TFT and on the CPU. Clipped to the side bands. ---
+  function drawSportBackground(mix, now, speedT, leftOnly, color) {
     ctx.save();
-    // Keep every SPORT effect inside the side bands; the ADAS window stays clear.
     ctx.beginPath(); ctx.rect(0, 0, 520, H); ctx.rect(1400, 0, 520, H); ctx.clip();
     ctx.globalCompositeOperation = "lighter";
-    // Red glow pool behind each dial (fades out before reaching the center column).
-    // Softer than before (less flooding) and tinted by the configurable hot color;
-    // the full-cluster #sport-wash now carries most of the SPORT tint.
-    var hc = cfg.hotColor, hcs = hc[0] + "," + hc[1] + "," + hc[2];
-    (leftOnly ? [LEFT] : [LEFT, RIGHT]).forEach(function (g) {
-      var pool = ctx.createRadialGradient(g.cx, g.cy, g.r * 0.35, g.cx, g.cy, g.r + 150);
-      pool.addColorStop(0, "rgba(" + hcs + ",0)");
-      pool.addColorStop(0.55, "rgba(" + hcs + "," + (0.06 * mix) + ")");
-      pool.addColorStop(1, "rgba(" + hcs + ",0)");
-      ctx.fillStyle = pool;
-      ctx.beginPath(); ctx.arc(g.cx, g.cy, g.r + 150, 0, Math.PI * 2); ctx.fill();
-    });
-    // Warp streaks: left dial -> left hemisphere, right dial -> right hemisphere.
-    var baseLen = 80 + 220 * speedT;           // longer streaks, visible even parked
     ctx.lineCap = "round";
-    (leftOnly ? [[LEFT, 90]] : [[LEFT, 90], [RIGHT, -90]]).forEach(function (pair) {
-      var g = pair[0], a0 = pair[1];           // hemisphere facing away from center
-      var n = cfg.intensity === "Calmo" ? 9 : (cfg.intensity === "Tempestade" ? 16 : 13);  // streak fan (perf-aware)
+    var G = cfg.glow;
+    var cs = color[0] + "," + color[1] + "," + color[2];
+    var reach = 150 + 250 * speedT;                       // how far the field extends
+    var flow = now * (0.00065 + 0.0017 * speedT);          // outward motion, faster w/ speed
+    var n = cfg.intensity === "Calmo" ? 12 : (cfg.intensity === "Tempestade" ? 24 : 18);
+    var dials = leftOnly ? [LEFT] : [LEFT, RIGHT];
+    for (var d = 0; d < dials.length; d++) {
+      var g = dials[d];
       for (var k = 0; k < n; k++) {
-        var frac = k / (n - 1);
-        var a = rad(a0 + frac * 180);
-        var phase = ((now * 0.0012 * (0.5 + speedT) + k * 0.313) % 1 + 1) % 1;
-        var r0 = g.r + 50 + phase * (90 + 220 * speedT);
-        var len = baseLen * (0.5 + 0.5 * Math.sin(frac * Math.PI));
-        var x0 = g.cx + Math.cos(a) * r0,       y0 = g.cy + Math.sin(a) * r0;
-        var x1 = g.cx + Math.cos(a) * (r0 + len), y1 = g.cy + Math.sin(a) * (r0 + len);
-        // Brighter streaks with a higher floor so they read at any speed, while
-        // the red glow pools behind them are softer than before.
-        var al = 0.5 * mix * (1 - phase) * (0.65 + 0.35 * speedT);
-        var grad = ctx.createLinearGradient(x0, y0, x1, y1);
-        grad.addColorStop(0, "rgba(255,80,55,0)");
-        grad.addColorStop(0.45, "rgba(255,90,60," + al + ")");
-        grad.addColorStop(0.8, "rgba(255,210,190," + (al * 0.9) + ")");
-        grad.addColorStop(1, "rgba(255,255,255,0)");
-        ctx.strokeStyle = grad; ctx.lineWidth = 3.4;
-        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+        var ang = (k / n) * Math.PI * 2 + d * 0.21;        // even fan, offset per dial
+        var ca = Math.cos(ang), sa = Math.sin(ang);
+        var phase = ((flow + k * 0.37 + d * 0.5) % 1 + 1) % 1;  // staggered loop
+        var head = 22 + phase * reach;                     // streak head distance
+        var len = 24 + (80 + 150 * speedT) * phase;        // stretches as it flies out
+        var tail = Math.max(8, head - len);
+        var al = mix * G * (0.45 + 0.55 * speedT) * Math.sin(phase * Math.PI);
+        if (al <= 0.015) continue;
+        ctx.strokeStyle = "rgba(" + cs + "," + al + ")";
+        ctx.lineWidth = 1.4 + 2.4 * phase;                 // thicker toward the outside
+        ctx.beginPath();
+        ctx.moveTo(g.cx + ca * tail, g.cy + sa * tail);
+        ctx.lineTo(g.cx + ca * head, g.cy + sa * head);
+        ctx.stroke();
       }
-    });
+    }
     ctx.globalCompositeOperation = "source-over";
     ctx.restore();
   }
@@ -1509,7 +1486,7 @@
     // the side bands so nothing ever paints over the transparent ADAS window.
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, 520, H); ctx.rect(1400, 0, 520, H); ctx.clip();
-    if (state.sportMix > 0.01) drawSportBackground(state.sportMix, now, speedT, menuOpen);
+    if (state.sportMix > 0.01) drawSportBackground(state.sportMix, now, speedT, menuOpen, color);
     if (!staticLayer.left) staticLayer.left = buildStatic(LEFT);
     if (!staticLayer.right) staticLayer.right = buildStatic(RIGHT);
     ctx.drawImage(staticLayer.left, 0, 0);
@@ -1673,7 +1650,6 @@
       state.drive = enumVal(value, DRIVES) || "--";
       if (state.drive === "SPORT" && prevDrive !== "SPORT") { beast.sport = true; triggerBeast(); }
       else if (state.drive !== "SPORT" && prevDrive === "SPORT") { beast.sport = false; }
-      stage.classList.toggle("sport-mode", beast.sport);
       kick(); scheduleReadouts(); return;
     }
     if (field === "propulsion") {
@@ -1781,7 +1757,12 @@
       cfg.sparks = bridge.getPreference("stormSparks", "true") !== "false";
       var sv = Number(bridge.getPreference("stormSaturateSpeed", String(cfg.saturateSpeed)));
       if (Number.isFinite(sv) && sv > 0) cfg.saturateSpeed = sv;
+      var gl = Number(bridge.getPreference("apexGlow", String(Math.round(cfg.glow * 100))));
+      if (Number.isFinite(gl) && gl > 0) cfg.glow = clamp(gl / 100, 0.1, 1.4);
       cfg.coldColor = parseHex(bridge.getPreference("apexColorCold", "")) || cfg.coldColor;
+      cfg.midColor1 = parseHex(bridge.getPreference("apexColorMid1", "")) || cfg.midColor1;
+      cfg.midColor2 = parseHex(bridge.getPreference("apexColorMid2", "")) || cfg.midColor2;
+      cfg.midColor3 = parseHex(bridge.getPreference("apexColorMid3", "")) || cfg.midColor3;
       cfg.hotColor = parseHex(bridge.getPreference("apexColorHot", "")) || cfg.hotColor;
       cfg.regenColor = parseHex(bridge.getPreference("apexColorRegen", "")) || cfg.regenColor;
       var ts = Number(bridge.getPreference("apexTractionScale", String(cfg.tractionScale)));
@@ -1800,9 +1781,11 @@
     try { if (bridge.getAvailableKeys) available = JSON.parse(bridge.getAvailableKeys()); } catch (e) {}
     var prefs = ["app.preferences.stormIntensity", "app.preferences.stormLightning",
                  "app.preferences.stormSparks", "app.preferences.stormSaturateSpeed",
-                 "app.preferences.apexColorCold", "app.preferences.apexColorHot",
-                 "app.preferences.apexColorRegen", "app.preferences.apexTractionScale",
-                 "app.preferences.apexRegenScale"];
+                 "app.preferences.apexGlow",
+                 "app.preferences.apexColorCold", "app.preferences.apexColorMid1",
+                 "app.preferences.apexColorMid2", "app.preferences.apexColorMid3",
+                 "app.preferences.apexColorHot", "app.preferences.apexColorRegen",
+                 "app.preferences.apexTractionScale", "app.preferences.apexRegenScale"];
     // Union of gauge keys + the menu subsystem's keys (trip/tire/AC/settings) +
     // the clusterEnabled visibility signal, de-duplicated.
     var carKeys = Object.keys(KEYS).concat(menus ? menus.keys : []).concat(["clusterEnabled"]);
@@ -1825,7 +1808,11 @@
     if (k === "app.preferences.stormLightning") { cfg.lightning = (v === "true" || v === true || v === "1"); kick(); return; }
     if (k === "app.preferences.stormSparks") { cfg.sparks = (v === "true" || v === true || v === "1"); kick(); return; }
     if (k === "app.preferences.stormSaturateSpeed") { var n = Number(v); if (n > 0) cfg.saturateSpeed = n; kick(); return; }
+    if (k === "app.preferences.apexGlow") { var n = Number(v); if (Number.isFinite(n) && n > 0) { cfg.glow = clamp(n / 100, 0.1, 1.4); kick(); } return; }
     if (k === "app.preferences.apexColorCold") { var c = parseHex(v); if (c) { cfg.coldColor = c; applyColors(); kick(); } return; }
+    if (k === "app.preferences.apexColorMid1") { var c = parseHex(v); if (c) { cfg.midColor1 = c; applyColors(); kick(); } return; }
+    if (k === "app.preferences.apexColorMid2") { var c = parseHex(v); if (c) { cfg.midColor2 = c; applyColors(); kick(); } return; }
+    if (k === "app.preferences.apexColorMid3") { var c = parseHex(v); if (c) { cfg.midColor3 = c; applyColors(); kick(); } return; }
     if (k === "app.preferences.apexColorHot") { var c = parseHex(v); if (c) { cfg.hotColor = c; applyColors(); kick(); } return; }
     if (k === "app.preferences.apexColorRegen") { var c = parseHex(v); if (c) { cfg.regenColor = c; applyColors(); kick(); } return; }
     if (k === "app.preferences.apexTractionScale") { var n = Number(v); if (n > 0) cfg.tractionScale = n; kick(); return; }

@@ -1,7 +1,7 @@
 <theme>
     <name>Apex Storm</name>
     <description>Dois mostradores circulares em neon que mudam de cor conforme a velocidade (azul -> vermelho ate 160 km/h), com raios e faiscas reativos a velocidade e aceleracao. Canvas 2D a 30fps, centro transparente para o ADAS nativo.</description>
-    <version>0.3.4</version>
+    <version>0.4.0</version>
     <thumbnail>thumbnail.png</thumbnail>
     <mainFile>app.html</mainFile>
     <decentralized>true</decentralized>
@@ -42,8 +42,16 @@
             <group>Cor</group>
         </configuration>
         <configuration>
+            <id>apex_glow</id>
+            <label>Brilho dos neons (%)</label>
+            <type>number</type>
+            <default>72</default>
+            <stateVariable>apexGlow</stateVariable>
+            <group>Cor</group>
+        </configuration>
+        <configuration>
             <id>apex_color_cold</id>
-            <label>Cor neon (baixa velocidade)</label>
+            <label>Cor 1 — parado / baixa velocidade</label>
             <type>color</type>
             <options>#2E8BFF, #00A0FF, #00E676, #B388FF, #FF6D00, #FF0033, #FFFFFF, #808080</options>
             <default>#2E8BFF</default>
@@ -51,8 +59,35 @@
             <group>Cor</group>
         </configuration>
         <configuration>
+            <id>apex_color_mid1</id>
+            <label>Cor 2 — velocidade baixa-média</label>
+            <type>color</type>
+            <options>#19E0D6, #00A0FF, #00E676, #B388FF, #FFC400, #FF6D00, #FF0033, #FFFFFF</options>
+            <default>#19E0D6</default>
+            <stateVariable>apexColorMid1</stateVariable>
+            <group>Cor</group>
+        </configuration>
+        <configuration>
+            <id>apex_color_mid2</id>
+            <label>Cor 3 — velocidade média</label>
+            <type>color</type>
+            <options>#7A3CFF, #B388FF, #19E0D6, #00A0FF, #FFC400, #FF6D00, #FF0033, #FFFFFF</options>
+            <default>#7A3CFF</default>
+            <stateVariable>apexColorMid2</stateVariable>
+            <group>Cor</group>
+        </configuration>
+        <configuration>
+            <id>apex_color_mid3</id>
+            <label>Cor 4 — velocidade média-alta</label>
+            <type>color</type>
+            <options>#FF2D9B, #FF0033, #FF6D00, #FFC400, #B388FF, #00A0FF, #FFFFFF, #808080</options>
+            <default>#FF2D9B</default>
+            <stateVariable>apexColorMid3</stateVariable>
+            <group>Cor</group>
+        </configuration>
+        <configuration>
             <id>apex_color_hot</id>
-            <label>Cor neon (alta velocidade / SPORT)</label>
+            <label>Cor 5 — alta velocidade / SPORT</label>
             <type>color</type>
             <options>#FF3B2E, #FF0033, #FF6D00, #FFC400, #B388FF, #00E676, #00A0FF, #FFFFFF</options>
             <default>#FF3B2E</default>
