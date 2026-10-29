@@ -41,17 +41,22 @@
      seam — a smooth blur-like color transition. Outer edges stay solid (they
      bleed off-screen). The neon gauges live on the canvas above and are NOT
      masked, so arcs/ticks stay crisp. */
-  #surf-left  { left: -80px; top: 72px; width: 600px; height: 648px;
+  /* Each side panel stays fully opaque up to the ADAS boundary (x520 / x1400) so
+     the OEM clusters remain covered, then feathers ONLY its inner edge a few pixels
+     INTO the central ADAS window for a soft panel->ADAS transition. Feathering
+     inward (toward the sides) is avoided because it would re-expose the OEM sliver
+     the panels are meant to hide. The footer feathers its top edge the same way. */
+  #surf-left  { left: -80px; top: 72px; width: 648px; height: 648px;
                 background: radial-gradient(360px 420px at 342px 288px, rgba(18,36,60,0.42), rgba(1,3,5,0) 60%), #010305;
-                -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 80px), transparent);
-                        mask-image: linear-gradient(to right, #000 calc(100% - 80px), transparent); }
-  #surf-right { right: -80px; top: 72px; width: 600px; height: 648px;
-                background: radial-gradient(360px 420px at 258px 288px, rgba(18,36,60,0.42), rgba(1,3,5,0) 60%), #010305;
-                -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 80px), transparent);
-                        mask-image: linear-gradient(to left, #000 calc(100% - 80px), transparent); }
+                -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent);
+                        mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent); }
+  #surf-right { right: -80px; top: 72px; width: 648px; height: 648px;
+                background: radial-gradient(360px 420px at 306px 288px, rgba(18,36,60,0.42), rgba(1,3,5,0) 60%), #010305;
+                -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 48px), transparent);
+                        mask-image: linear-gradient(to left, #000 calc(100% - 48px), transparent); }
   #surf-footer{ left: 520px; top: 650px; width: 880px; height: 70px; background: #010305;
-                -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 30px), transparent);
-                        mask-image: linear-gradient(to top, #000 calc(100% - 30px), transparent); }
+                -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 44px), transparent);
+                        mask-image: linear-gradient(to top, #000 calc(100% - 44px), transparent); }
 
   /* SPORT red wash — ONE continuous translucent layer across the whole cluster
      (both sides + footer), fading to clear in the central ADAS window, so there
@@ -285,7 +290,6 @@
   /* ---- Menu aberto: medidor direito vira barra vertical bipolar (desenhada no
      canvas); o readout de kW migra para a coluna à esquerda do painel e o painel
      direito fica totalmente opaco (sem feather) para cobrir o cluster nativo. ---- */
-  #stage.menu-open #surf-right { -webkit-mask-image: none; mask-image: none; }
   #stage.menu-open #right-box { left: 1398px; width: 112px; top: 150px; }
   #stage.menu-open #right-box .big { font-size: 52px; }
   #stage.menu-open #right-box #right-state { font-size: 17px; letter-spacing: 1px; }
