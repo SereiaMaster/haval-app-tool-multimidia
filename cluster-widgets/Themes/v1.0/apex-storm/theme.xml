@@ -1,7 +1,7 @@
 <theme>
     <name>Apex Storm</name>
     <description>Dois mostradores circulares em neon que mudam de cor conforme a velocidade (azul -> vermelho ate 160 km/h), com raios e faiscas reativos a velocidade e aceleracao. Canvas 2D a 30fps, centro transparente para o ADAS nativo.</description>
-    <version>0.4.0</version>
+    <version>0.5.0</version>
     <thumbnail>thumbnail.png</thumbnail>
     <mainFile>app.html</mainFile>
     <decentralized>true</decentralized>
@@ -45,7 +45,7 @@
             <id>apex_glow</id>
             <label>Brilho dos neons (%)</label>
             <type>number</type>
-            <default>72</default>
+            <default>50</default>
             <stateVariable>apexGlow</stateVariable>
             <group>Cor</group>
         </configuration>
@@ -62,8 +62,8 @@
             <id>apex_color_mid1</id>
             <label>Cor 2 — velocidade baixa-média</label>
             <type>color</type>
-            <options>#19E0D6, #00A0FF, #00E676, #B388FF, #FFC400, #FF6D00, #FF0033, #FFFFFF</options>
-            <default>#19E0D6</default>
+            <options>#18AAA2, #19E0D6, #00A0FF, #00E676, #B388FF, #FFC400, #FF6D00, #FF0033, #FFFFFF</options>
+            <default>#18AAA2</default>
             <stateVariable>apexColorMid1</stateVariable>
             <group>Cor</group>
         </configuration>

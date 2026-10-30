@@ -84,7 +84,7 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
     private val mediaRunnable =
             object : Runnable {
                 override fun run() {
-                    if (isSportThemeActive()) {
+                    if (isNowPlayingThemeActive()) {
                         publishNowPlayingState()
                         handler.postDelayed(this, 1000L)
                     }
@@ -2605,19 +2605,34 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
                 theme.equals("SportRedLite", ignoreCase = true)
     }
 
+    // Themes that consume the native now-playing feed (window.control 'nowPlaying*').
+    // This is a media-only superset of isSportThemeActive(): it must NOT enable the
+    // other sport-legacy behaviors (TSR/TPMS legacy/trip-v2/control fallback), which
+    // stay gated by isSportThemeActive(). Apex Storm reads nowPlaying* the same way
+    // SportRed does but is otherwise a standard v1.0 contract theme.
+    private fun isNowPlayingThemeActive(): Boolean {
+        if (isSportThemeActive()) return true
+        return getActiveCustomThemeName().equals("apex-storm", ignoreCase = true)
+    }
+
     private fun updateSportFeaturePolling() {
-        if (isSportThemeActive()) {
+        // Media polling: any now-playing-eligible theme (sport + apex-storm).
+        if (isNowPlayingThemeActive()) {
             handler.removeCallbacks(mediaRunnable)
             handler.post(mediaRunnable)
-            startTsrPolling()
         } else {
             handler.removeCallbacks(mediaRunnable)
-            tsrJob?.cancel()
-            tsrJob = null
-            lastTsrPayload = null
             artworkEncodingJob?.cancel()
             artworkEncodingJob = null
             nowPlayingResyncPending = true
+        }
+        // TSR polling stays strictly sport-only.
+        if (isSportThemeActive()) {
+            startTsrPolling()
+        } else {
+            tsrJob?.cancel()
+            tsrJob = null
+            lastTsrPayload = null
         }
         if (shouldPollTpms()) startTpmsPolling() else stopTpmsPolling()
     }
@@ -2786,7 +2801,7 @@ class InstrumentProjector2(private val outerContext: Context, display: Display) 
                         scope.launch(Dispatchers.Default) {
                             val encoded = encodeArtwork(artwork)
                             withContext(Dispatchers.Main.immediate) {
-                                if (isSportThemeActive() && artwork === lastNowPlayingArtwork) {
+                                if (isNowPlayingThemeActive() && artwork === lastNowPlayingArtwork) {
                                     evaluateJsIfReady(
                                             webView,
                                             controlStringJs("nowPlayingArt", encoded)
